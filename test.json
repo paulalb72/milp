@@ -1,0 +1,134 @@
+{
+  "sets": {
+    "J": ["J1", "J2"],
+    "M": ["M1", "M2", "M3"],
+    "B": ["B1"],
+    "K": ["A", "B"],
+    "A": ["arm_M1", "arm_M2"],
+    "V_out": "OUT"
+  },
+
+  "jobs": [
+    {
+      "job_id": "J1",
+      "release": 0,
+      "deadline": 100,
+      "operations": [
+        { "op_index": 1, "task_type": "A" },
+        { "op_index": 2, "task_type": "B" }
+      ]
+    },
+    {
+      "job_id": "J2",
+      "release": 0,
+      "deadline": 100,
+      "operations": [
+        { "op_index": 1, "task_type": "A" },
+        { "op_index": 2, "task_type": "A" }
+      ]
+    }
+  ],
+
+  "task_types": {
+    "A": {
+      "coalition_size": 2,
+      "description": "needs 2 machines simultaneously"
+    },
+    "B": {
+      "coalition_size": 1,
+      "description": "needs 1 machine"
+    }
+  },
+
+  "machines": {
+    "M1": {
+      "capabilities": ["A"],
+      "processing_time": { "A": 6 },
+      "has_arm": true,
+      "arm_id": "arm_M1"
+    },
+    "M2": {
+      "capabilities": ["A", "B"],
+      "processing_time": { "A": 5, "B": 4 },
+      "has_arm": true,
+      "arm_id": "arm_M2"
+    },
+    "M3": {
+      "capabilities": ["B"],
+      "processing_time": { "B": 3 },
+      "has_arm": false
+    }
+  },
+
+  "buffers": {
+    "B1": {
+      "capacity": 1,
+      "description": "physical buffer slot"
+    }
+  },
+
+  "arms": {
+    "arm_M1": {
+      "host_machine": "M1",
+      "description": "arm fixed at machine M1"
+    },
+    "arm_M2": {
+      "host_machine": "M2",
+      "description": "arm fixed at machine M2"
+    }
+  },
+
+  "graph": {
+    "nodes": ["M1", "M2", "M3", "B1", "OUT"],
+    "edges": [
+      {
+        "edge_id": "e_M1_B1",
+        "tail": "M1",
+        "head": "B1",
+        "delta": 1,
+        "served_by_arm": "arm_M1"
+      },
+      {
+        "edge_id": "e_M2_B1",
+        "tail": "M2",
+        "head": "B1",
+        "delta": 1,
+        "served_by_arm": "arm_M2"
+      },
+      {
+        "edge_id": "e_B1_M2",
+        "tail": "B1",
+        "head": "M2",
+        "delta": 1,
+        "served_by_arm": "arm_M2"
+      },
+      {
+        "edge_id": "e_B1_M3",
+        "tail": "B1",
+        "head": "M3",
+        "delta": 2,
+        "served_by_arm": "arm_M2"
+      },
+      {
+        "edge_id": "e_M2_OUT",
+        "tail": "M2",
+        "head": "OUT",
+        "delta": 1,
+        "served_by_arm": "arm_M2"
+      },
+      {
+        "edge_id": "e_M3_OUT",
+        "tail": "M3",
+        "head": "OUT",
+        "delta": 1,
+        "served_by_arm": "arm_M2"
+      }
+    ]
+  },
+
+  "milp": {
+    "bigM": 100000,
+    "objective": "min_sum_completion_times_at_exit",
+    "completion_time_definition": "A[j, Ij, OUT]"
+  }
+}
