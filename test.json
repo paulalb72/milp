@@ -1,10 +1,10 @@
 {
   "sets": {
-    "J": ["J1", "J2"],
-    "M": ["M1", "M2", "M3"],
+    "J": ["J1", "J2", "J3"],
+    "M": ["M1", "M2", "M3", "M4"],
     "B": ["B1"],
     "K": ["A", "B"],
-    "A": ["arm_M1", "arm_M2"],
+    "A": ["arm_M1", "arm_M2", "arm_M4"],
     "V_out": "OUT"
   },
 
@@ -25,6 +25,15 @@
       "operations": [
         { "op_index": 1, "task_type": "A" },
         { "op_index": 2, "task_type": "A" }
+      ]
+    },
+    {
+      "job_id": "J3",
+      "release": 2,
+      "deadline": 120,
+      "operations": [
+        { "op_index": 1, "task_type": "B" },
+        { "op_index": 2, "task_type": "B" }
       ]
     }
   ],
@@ -57,6 +66,12 @@
       "capabilities": ["B"],
       "processing_time": { "B": 3 },
       "has_arm": false
+    },
+    "M4": {
+      "capabilities": ["B"],
+      "processing_time": { "B": 2 },
+      "has_arm": true,
+      "arm_id": "arm_M4"
     }
   },
 
@@ -75,11 +90,15 @@
     "arm_M2": {
       "host_machine": "M2",
       "description": "arm fixed at machine M2"
+    },
+    "arm_M4": {
+      "host_machine": "M4",
+      "description": "arm fixed at machine M4"
     }
   },
 
   "graph": {
-    "nodes": ["M1", "M2", "M3", "B1", "OUT"],
+    "nodes": ["M1", "M2", "M3", "M4", "B1", "OUT"],
     "edges": [
       {
         "edge_id": "e_M1_B1",
@@ -122,6 +141,13 @@
         "head": "OUT",
         "delta": 1,
         "served_by_arm": "arm_M2"
+      },
+      {
+        "edge_id": "e_M4_OUT",
+        "tail": "M4",
+        "head": "OUT",
+        "delta": 1,
+        "served_by_arm": "arm_M4"
       }
     ]
   },

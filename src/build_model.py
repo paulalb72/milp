@@ -193,7 +193,19 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     def obj_rule(mm):
         return sum(mm.Arr[(j, I_last[j]), data.OUT] for j in data.J)
 
-    m.OBJ = pyo.Objective(rule=obj_rule, sense=pyo.minimize)
+    # m.OBJ = pyo.Objective(rule=obj_rule, sense=pyo.minimize) ALTES OBJECTIVE (SUMME ÜBER ALLE)
+
+
+    # AB HIER: DEFINITION NEUES OBJECTIVE
+    m.Tmax = pyo.Var(domain=pyo.NonNegativeReals)
+
+    def makespan_rule(mm, j):
+        i = I_last[j]
+        return mm.Tmax >= mm.Arr[(j, i), data.OUT]
+    m.MAKESPAN = pyo.Constraint(m.J, rule=makespan_rule)
+
+    m.OBJ = pyo.Objective(expr=m.Tmax, sense=pyo.minimize)
+    # BIS HIER: DEFINITION NEUES OBJECTIVE
 
     # ----------------------------
     # (P) Coalition + leader + eligibility
@@ -332,16 +344,17 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
 
     # F4: no splitting, at most one in/out per node and stage
     def nosplit_out_rule(mm, j, i, v):
-        # out-edges for node v in stage (j,i)
-        outE = data.out_edges.get(v, [])
+        edges = data.out_edges.get(v, [])
+        if len(edges) == 0:
+            return pyo.Constraint.Feasible  # nichts zu beschränken
+        return sum(mm.u[(j, i), e] for e in edges) <= 1
 
-        # If no outgoing edges (e.g. OUT), skip the constraint
-        if len(outE) == 0:
-            return pyo.Constraint.Skip
-
-        return sum(mm.u[(j, i), e] for e in outE) <= 1
     def nosplit_in_rule(mm, j, i, v):
-        return sum(mm.u[(j, i), e] for e in data.in_edges.get(v, [])) <= 1
+        edges = data.in_edges.get(v, [])
+        if len(edges) == 0:
+            return pyo.Constraint.Feasible  # nichts zu beschränken
+        return sum(mm.u[(j, i), e] for e in edges) <= 1
+
 
     m.F4a = pyo.Constraint(m.S, m.V, rule=nosplit_out_rule)
     m.F4b = pyo.Constraint(m.S, m.V, rule=nosplit_in_rule)
@@ -391,13 +404,21 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     m.T5b = pyo.Constraint(m.S, m.MACH, rule=T5_upper)
 
     # T6: next operation cannot start before arrival at its leader machine
-    def T6_rule(mm, j, i, mach):
+    def T6_ge_rule(mm, j, i, mach):
         nxt = next_op[(j, i)]
         if nxt is None:
             return pyo.Constraint.Skip
-        # If next op leader is mach: t_next >= Arr(stage, mach)
         return mm.t[nxt] >= mm.Arr[(j, i), mach] - mm.BigM * (1 - mm.x[nxt, mach])
-    m.T6 = pyo.Constraint(m.S, m.MACH, rule=T6_rule)
+    m.T6 = pyo.Constraint(m.S, m.MACH, rule=T6_ge_rule)
+
+    # T6_le: enforce equality when x[nxt, mach] == 1  ->  t[nxt] <= Arr(...)
+    def T6_le_rule(mm, j, i, mach):
+        nxt = next_op[(j, i)]
+        if nxt is None:
+            return pyo.Constraint.Skip
+        return mm.t[nxt] <= mm.Arr[(j, i), mach] + mm.BigM * (1 - mm.x[nxt, mach])
+    m.T6_le = pyo.Constraint(m.S, m.MACH, rule=T6_le_rule)
+
 
     # T7: deadline at OUT
     def T7_rule(mm, j):

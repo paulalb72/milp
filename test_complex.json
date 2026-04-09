@@ -1,0 +1,183 @@
+{
+  "sets": {
+    "J": ["J1", "J2", "J3"],
+    "M": ["M1", "M2", "M3", "M4", "M5", "M6"],
+    "B": ["B24", "B12", "B56"],
+    "K": ["WELD", "PAINT", "INSPECT", "ASSEMBLE_2"],
+    "A": ["arm_M2", "arm_M4", "arm_M5", "arm_M6"],
+    "V_out": "OUT"
+  },
+
+  "jobs": [
+    {
+      "job_id": "J1",
+      "variant": "V1",
+      "release": 0,
+      "deadline": 80,
+      "operations": [
+        { "op_index": 1, "task_type": "WELD" },
+        { "op_index": 2, "task_type": "ASSEMBLE_2" },
+        { "op_index": 3, "task_type": "PAINT" }
+      ]
+    },
+    {
+      "job_id": "J2",
+      "variant": "V1",
+      "release": 0,
+      "deadline": 80,
+      "operations": [
+        { "op_index": 1, "task_type": "WELD" },
+        { "op_index": 2, "task_type": "ASSEMBLE_2" },
+        { "op_index": 3, "task_type": "INSPECT" }
+      ]
+    },
+    {
+      "job_id": "J3",
+      "variant": "V2",
+      "release": 1,
+      "deadline": 90,
+      "operations": [
+        { "op_index": 1, "task_type": "WELD" },
+        { "op_index": 2, "task_type": "PAINT" },
+        { "op_index": 3, "task_type": "INSPECT" }
+      ]
+    }
+  ],
+
+
+
+  "task_types": {
+    "WELD": {
+      "coalition_size": 1,
+      "description": "single-machine welding"
+    },
+    "PAINT": {
+      "coalition_size": 1,
+      "description": "single-machine painting"
+    },
+    "INSPECT": {
+      "coalition_size": 1,
+      "description": "single-machine inspection"
+    },
+    "ASSEMBLE_2": {
+      "coalition_size": 2,
+      "description": "needs 2 machines simultaneously"
+    }
+  },
+
+  "machines": {
+    "M1": {
+      "capabilities": ["WELD"],
+      "processing_time": { "WELD": 6 },
+      "has_arm": false
+    },
+    "M2": {
+      "capabilities": ["WELD", "ASSEMBLE_2"],
+      "processing_time": { "WELD": 5, "ASSEMBLE_2": 8 },
+      "has_arm": true,
+      "arm_id": "arm_M2"
+    },
+    "M3": {
+      "capabilities": ["INSPECT"],
+      "processing_time": { "INSPECT": 4 },
+      "has_arm": false
+    },
+    "M4": {
+      "capabilities": ["PAINT", "ASSEMBLE_2"],
+      "processing_time": { "PAINT": 4, "ASSEMBLE_2": 7 },
+      "has_arm": true,
+      "arm_id": "arm_M4"
+    },
+    "M5": {
+      "capabilities": ["PAINT", "INSPECT"],
+      "processing_time": { "PAINT": 5, "INSPECT": 5 },
+      "has_arm": true,
+      "arm_id": "arm_M5"
+    },
+    "M6": {
+      "capabilities": ["WELD", "ASSEMBLE_2"],
+      "processing_time": { "WELD": 7, "ASSEMBLE_2": 9 },
+      "has_arm": true,
+      "arm_id": "arm_M6"
+    }
+  },
+
+  "buffers": {
+    "B24": {
+      "capacity": 1,
+      "description": "HOTSPOT buffer between M2 and M4"
+    },
+    "B12": {
+      "capacity": 1,
+      "description": "buffer near M2 for quick offload (keeps M2 free)"
+    },
+    "B56": {
+      "capacity": 1,
+      "description": "buffer between M6 and M5"
+    }
+  },
+
+  "arms": {
+    "arm_M2": {
+      "host_machine": "M2",
+      "description": "arm fixed at machine M2"
+    },
+    "arm_M4": {
+      "host_machine": "M4",
+      "description": "arm fixed at machine M4"
+    },
+    "arm_M5": {
+      "host_machine": "M5",
+      "description": "arm fixed at machine M5"
+    },
+    "arm_M6": {
+      "host_machine": "M6",
+      "description": "arm fixed at machine M6"
+    }
+  },
+
+  "graph": {
+    "nodes": ["M1", "M2", "M3", "M4", "M5", "M6", "B24", "B12", "B56", "OUT"],
+    "edges": [
+      { "edge_id": "e_M2_OUT", "tail": "M2", "head": "OUT", "delta": 1.0, "served_by_arm": "arm_M2" },
+      { "edge_id": "e_M4_OUT", "tail": "M4", "head": "OUT", "delta": 0.8, "served_by_arm": "arm_M4" },
+      { "edge_id": "e_M3_OUT", "tail": "M3", "head": "OUT", "delta": 1.2, "served_by_arm": "arm_M4" },
+      { "edge_id": "e_M5_OUT", "tail": "M5", "head": "OUT", "delta": 1.0, "served_by_arm": "arm_M5" },
+      { "edge_id": "e_M6_OUT", "tail": "M6", "head": "OUT", "delta": 1.1, "served_by_arm": "arm_M6" },
+
+      { "edge_id": "e_M2_M4_direct", "tail": "M2", "head": "M4", "delta": 1.6, "served_by_arm": "arm_M2" },
+      { "edge_id": "e_M2_B24", "tail": "M2", "head": "B24", "delta": 0.9, "served_by_arm": "arm_M2" },
+      { "edge_id": "e_B24_M4", "tail": "B24", "head": "M4", "delta": 0.9, "served_by_arm": "arm_M4" },
+
+      { "edge_id": "e_M4_M2_direct", "tail": "M4", "head": "M2", "delta": 1.6, "served_by_arm": "arm_M4" },
+      { "edge_id": "e_M4_B24", "tail": "M4", "head": "B24", "delta": 0.9, "served_by_arm": "arm_M4" },
+      { "edge_id": "e_B24_M2", "tail": "B24", "head": "M2", "delta": 0.9, "served_by_arm": "arm_M2" },
+
+      { "edge_id": "e_M2_B12", "tail": "M2", "head": "B12", "delta": 0.25, "served_by_arm": "arm_M2" },
+      { "edge_id": "e_B12_M2", "tail": "B12", "head": "M2", "delta": 0.25, "served_by_arm": "arm_M2" },
+
+      { "edge_id": "e_M4_M3", "tail": "M4", "head": "M3", "delta": 1.1, "served_by_arm": "arm_M4" },
+      { "edge_id": "e_M3_M4", "tail": "M3", "head": "M4", "delta": 1.1, "served_by_arm": "arm_M4" },
+
+      { "edge_id": "e_M6_M5_direct", "tail": "M6", "head": "M5", "delta": 1.4, "served_by_arm": "arm_M6" },
+      { "edge_id": "e_M6_B56", "tail": "M6", "head": "B56", "delta": 0.6, "served_by_arm": "arm_M6" },
+      { "edge_id": "e_B56_M5", "tail": "B56", "head": "M5", "delta": 0.6, "served_by_arm": "arm_M5" },
+
+      { "edge_id": "e_M5_M6_direct", "tail": "M5", "head": "M6", "delta": 1.4, "served_by_arm": "arm_M5" },
+      { "edge_id": "e_M5_B56", "tail": "M5", "head": "B56", "delta": 0.6, "served_by_arm": "arm_M5" },
+      { "edge_id": "e_B56_M6", "tail": "B56", "head": "M6", "delta": 0.6, "served_by_arm": "arm_M6" },
+
+      { "edge_id": "e_M1_M2_direct", "tail": "M1", "head": "M2", "delta": 1.3, "served_by_arm": "arm_M2" },
+      { "edge_id": "e_M2_M1_direct", "tail": "M2", "head": "M1", "delta": 1.3, "served_by_arm": "arm_M2" },
+
+      { "edge_id": "e_M4_M6_direct", "tail": "M4", "head": "M6", "delta": 2.0, "served_by_arm": "arm_M4" },
+      { "edge_id": "e_M6_M4_direct", "tail": "M6", "head": "M4", "delta": 2.0, "served_by_arm": "arm_M6" }
+    ]
+  },
+
+  "milp": {
+    "bigM": 100000,
+    "objective": "min_sum_completion_times_at_exit",
+    "completion_time_definition": "A[j, Ij, OUT]"
+  }
+}

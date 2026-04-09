@@ -1,6 +1,7 @@
 # src/solve.py
 # src/solve.py
 from __future__ import annotations
+from .gantt import render_gantt
 
 import argparse
 import json
@@ -162,6 +163,20 @@ def main():
     model = build_model(data)
 
     solver = pick_solver()
+
+    highs_opts = {
+        "time_limit": 20000,        # Sekunden
+        "mip_rel_gap": 0.01,      #  Prozent Gap
+        # "mip_abs_gap": 1e-3,
+        # "mip_max_nodes": 200000,
+        # "mip_max_stall_nodes": 20000,
+        # "mip_max_improving_sols": 20,
+    }
+
+    if hasattr(solver, "highs_options"):      # appsi_highs
+        solver.highs_options.update(highs_opts)
+    else:                                    # highs legacy
+        solver.options.update(highs_opts)
     result = solver.solve(model, tee=True)
 
     # Basic solve status check
@@ -176,6 +191,8 @@ def main():
 
     (out_dir / "solution.json").write_text(json.dumps(sol, indent=2), encoding="utf-8")
     (out_dir / "solution.txt").write_text(write_human_readable(data, sol), encoding="utf-8")
+    gantt_path = render_gantt(data, sol, out_dir)
+    print(f"Wrote: - {gantt_path}")
 
     print("\nWrote:")
     print(" -", out_dir / "solution.json")
