@@ -87,7 +87,8 @@ def extract_solution(data, model) -> dict:
 
     # Transfers: list used edges per stage (j,i)
     transfers = {}
-    for (j, i) in data.ops:
+    stages = [(j, 0) for j in data.J] + data.ops
+    for (j, i) in stages:
         used = []
         for e in data.E:
             if pyo.value(model.u[(j, i), e]) > 0.5:
@@ -133,11 +134,12 @@ def write_human_readable(data, sol: dict) -> str:
         lines.append(f"Op {key}  leader={lead}  coalition={team}  t={t:.3f}  C={C:.3f}  g={g:.3f}")
 
     lines.append("\n=== TRANSFERS (used edges per stage) ===")
-    for (j, i) in data.ops:
+    stages = [(j, 0) for j in data.J] + data.ops
+    for (j, i) in stages:
         key = f"{j}:{i}"
         edges = sol["transfers"][key]
         if not edges:
-            lines.append(f"Stage {key}: (no edges selected)  <-- should not happen, check graph")
+            lines.append(f"Stage {key}: (no edges selected)  <-- stays at current location")
             continue
         lines.append(f"Stage {key}:")
         for e in edges:

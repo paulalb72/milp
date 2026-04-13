@@ -73,6 +73,7 @@ def render_gantt(data: Any, solution: Dict[str, Any], out_dir: Path) -> Path:
     machines = set(_get(data, "machines", []) or [])
     arms = set(_get(data, "arms", []) or [])
     buffers = set(_get(data, "buffers", []) or [])
+    entries = set(_get(data, "V_in", []) or [])
 
     # Fallback: infer from solution if not in data
     for op, leader in leaders.items():
@@ -86,8 +87,13 @@ def render_gantt(data: Any, solution: Dict[str, Any], out_dir: Path) -> Path:
                 arms.add(e["arm"])
             if "host" in e:
                 machines.add(e["host"])
-            # buffers can be inferred if provided in data; otherwise skip inference to avoid mixing
-            # (you could infer by node names if you have naming conventions)
+
+    # Infer buffers/entries from routing if not in machines and not OUT
+    for stage_key, edges in transfers.items():
+        for e in edges:
+            for node in (e["tail"], e["head"]):
+                if node not in machines and node != "OUT":
+                    buffers.add(node)
 
     machines = sorted(machines)
     arms = sorted(arms)
@@ -147,7 +153,7 @@ def render_gantt(data: Any, solution: Dict[str, Any], out_dir: Path) -> Path:
         # Buffer occupancy: for a buffer node b visited, occupied from arrival to departure
         # arrival at node = (prev S + prev delta), departure from node = (next S)
         # Only possible if buffers list exists.
-        if buffers:
+        if buffer_intervals:
             for idx in range(1, len(edges_ord)):
                 prev_e = edges_ord[idx - 1]
                 next_e = edges_ord[idx]
@@ -227,7 +233,10 @@ def render_gantt(data: Any, solution: Dict[str, Any], out_dir: Path) -> Path:
         elif kind == "A":
             ylabels.append(f"Arm {name}")
         else:
-            ylabels.append(f"Buffer {name}")
+            if name in entries:
+                ylabels.append(f"Entry {name}")
+            else:
+                ylabels.append(f"Buffer {name}")
 
     ax.set_yticks(yticks)
     ax.set_yticklabels(ylabels)

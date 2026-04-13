@@ -5,7 +5,8 @@
     "B": ["B1"],
     "K": ["task1", "task2"],
     "A": ["arm_M1", "arm_M2", "arm_M4"],
-    "V_out": "OUT"
+    "V_out": "OUT",
+    "V_in": ["IN1", "IN2"]
   },
 
   "jobs": [
@@ -13,6 +14,7 @@
       "job_id": "J1",
       "release": 0,
       "deadline": 100,
+      "entry_node": "IN1",
       "operations": [
         { "op_index": 1, "task_type": "task1" },
         { "op_index": 2, "task_type": "task2" }
@@ -22,6 +24,7 @@
       "job_id": "J2",
       "release": 0,
       "deadline": 100,
+      "entry_node": "IN2",
       "operations": [
         { "op_index": 1, "task_type": "task1" },
         { "op_index": 2, "task_type": "task1" }
@@ -31,6 +34,7 @@
       "job_id": "J3",
       "release": 2,
       "deadline": 120,
+      "entry_node": "IN1",
       "operations": [
         { "op_index": 1, "task_type": "task2" },
         { "op_index": 2, "task_type": "task2" }
@@ -105,8 +109,36 @@
   },
 
   "graph": {
-    "nodes": ["M1", "M2", "M3", "M4", "B1", "OUT"],
+    "nodes": ["IN1", "IN2", "M1", "M2", "M3", "M4", "B1", "OUT"],
     "edges": [
+      {
+        "edge_id": "e_IN1_M1",
+        "tail": "IN1",
+        "head": "M1",
+        "delta": 1,
+        "served_by_arm": "arm_M1"
+      },
+      {
+        "edge_id": "e_IN1_M2",
+        "tail": "IN1",
+        "head": "M2",
+        "delta": 1,
+        "served_by_arm": "arm_M2"
+      },
+      {
+        "edge_id": "e_IN2_M1",
+        "tail": "IN2",
+        "head": "M1",
+        "delta": 1,
+        "served_by_arm": "arm_M1"
+      },
+      {
+        "edge_id": "e_IN2_M4",
+        "tail": "IN2",
+        "head": "M4",
+        "delta": 1,
+        "served_by_arm": "arm_M4"
+      },
       {
         "edge_id": "e_M1_B1",
         "tail": "M1",

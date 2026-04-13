@@ -18,6 +18,10 @@ class InstanceData:
     V: List[str]
     OUT: str
 
+    # Entry points
+    V_in: List[str]
+    job_entry: Dict[str, str]
+
     # Jobs / operations
     ops: List[Tuple[str, int]]                    # O = [(job_id, op_index)]
     ops_by_job: Dict[str, List[int]]              # {job_id: [1,2,...]}
@@ -75,6 +79,7 @@ def load_instance(json_path: str | Path) -> InstanceData:
     K = raw["sets"]["K"]
     Arms = raw["sets"].get("A", [])
     OUT = raw["sets"].get("V_out", "OUT")
+    V_in = raw["sets"].get("V_in", [])
 
     # Nodes: we accept either explicit nodes or infer
     graph_nodes = raw["graph"].get("nodes", None)
@@ -89,11 +94,19 @@ def load_instance(json_path: str | Path) -> InstanceData:
     tau: Dict[Tuple[str, int], str] = {}
     release: Dict[str, float] = {}
     deadline: Dict[str, float] = {}
+    job_entry: Dict[str, str] = {}
 
     for job in raw["jobs"]:
         j = job["job_id"]
         release[j] = float(job.get("release", 0.0))
         deadline[j] = float(job.get("deadline", 1e9))
+
+        # Start-Knoten erfassen (Fallback auf V_in Liste)
+        entry = job.get("entry_node")
+        if entry:
+            job_entry[j] = entry
+        elif V_in:
+            job_entry[j] = V_in[0]
 
         op_list = job["operations"]
         op_indices = [int(o["op_index"]) for o in op_list]
@@ -220,6 +233,7 @@ def load_instance(json_path: str | Path) -> InstanceData:
 
     return InstanceData(
         J=J, M=M, B=B, K=K, Arms=Arms, V=V, OUT=OUT,
+        V_in=V_in, job_entry=job_entry,
         ops=ops, ops_by_job=ops_by_job, tau=tau,
         release=release, deadline=deadline,
         r=r, elig=elig, ptime=ptime,

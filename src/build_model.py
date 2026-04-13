@@ -27,7 +27,7 @@ def compute_bigM(data: InstanceData) -> float:
 
     # crude upper bound for transport: assume at most |V| edges per stage * max delta
     max_delta = max(data.delta[e] for e in data.E) if data.E else 0.0
-    num_stages = sum(len(data.ops_by_job[j]) for j in data.J)  # one stage per op (incl last -> OUT)
+    num_stages = sum(len(data.ops_by_job[j]) + 1 for j in data.J)  # +1 for i=0 stage
     trans_bound = num_stages * (len(data.V) + 1) * max_delta
 
     return proc_bound + trans_bound + 10.0
@@ -65,13 +65,17 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
 
     # Stages S = also (j,i), one transfer stage after each op i
     # We treat stage (j,i) as "transfer after op i".
-    m.S = pyo.Set(dimen=2, initialize=data.ops)
+    stage_list = [(j, 0) for j in data.J] + data.ops
+    m.S = pyo.Set(dimen=2, initialize=stage_list)
 
     # Convenience: last operation index per job
     I_last = {j: max(data.ops_by_job[j]) for j in data.J}
 
     # Helper to get next op for precedence, None if last
     next_op: Dict[Tuple[str, int], Tuple[str, int] | None] = {}
+    for j in data.J:
+        first_i = min(data.ops_by_job[j])
+        next_op[(j, 0)] = (j, first_i)
     for (j, i) in data.ops:
         if i < I_last[j]:
             next_op[(j, i)] = (j, i + 1)
@@ -156,7 +160,7 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     # Arm sequencing for transfers: define alpha=(j,i,e)
     # We'll build pairs only for same arm.
     alpha_list = []
-    for (j, i) in data.ops:
+    for (j, i) in stage_list:
         for e in data.E:
             alpha_list.append((j, i, e))
     m.ALPHA = pyo.Set(dimen=3, initialize=alpha_list)
@@ -176,7 +180,7 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     # This is heavy: q_mix[o, alpha]. For testing it's fine.
     mix_pairs = []
     for (oj, oi) in data.ops:
-        for (sj, si) in data.ops:
+        for (sj, si) in stage_list:
             for e in data.E:
                 mix_pairs.append((oj, oi, sj, si, e))
     m.MIX = pyo.Set(dimen=5, initialize=mix_pairs)
@@ -186,7 +190,6 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     m.z = pyo.Var(m.S, m.BUF, domain=pyo.Binary)
 
     # Buffer sequencing pairs
-    stage_list = data.ops
     buf_pairs = []
     for b in data.B:
         for a_idx in range(len(stage_list)):
@@ -275,12 +278,6 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
         return mm.C[(j, i)] == mm.t[(j, i)] + mm.p[(j, i)]
     m.P6 = pyo.Constraint(m.O, rule=completion_rule)
 
-    # P7: release time for first operation of each job
-    def release_rule(mm, j):
-        first_i = min(data.ops_by_job[j])
-        return mm.t[(j, first_i)] >= mm.release[j]
-    m.P7 = pyo.Constraint(m.J, rule=release_rule)
-
     # ----------------------------
     # (M) Machine blocking/release
     # ----------------------------
@@ -335,7 +332,39 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     #
     # Buffers always have net flow 0.
 
+    # Helper: Spawn-Punkt eines Auftrags ermitteln
+    def get_v_in(j):
+        if hasattr(data, "job_entry") and j in data.job_entry:
+            return data.job_entry[j]
+        if hasattr(data, "V_in") and getattr(data, "V_in"):
+            return getattr(data, "V_in")[0]
+        candidates = [v for v in data.V if v not in data.M and v != data.OUT and v not in data.B]
+        if candidates: return candidates[0]
+        return data.V[0] 
+
+    # F0a & F0b: Routing für die Startphase i=0
+    def flow_f0_rule(mm, j, v):
+        v_in = get_v_in(j)
+        if v != v_in and v not in mm.MACH:
+            return pyo.Constraint.Skip
+            
+        out_sum = sum(mm.u[(j, 0), e] for e in data.out_edges.get(v, []))
+        in_sum = sum(mm.u[(j, 0), e] for e in data.in_edges.get(v, []))
+        first_i = min(data.ops_by_job[j])
+        
+        rhs = 0
+        if v == v_in:
+            rhs += 1
+        if v in mm.MACH:
+            rhs -= mm.x[(j, first_i), v]
+            
+        return out_sum - in_sum == rhs
+        
+    m.F0 = pyo.Constraint(m.J, m.V, rule=flow_f0_rule)
+
     def flow_machines_rule(mm, j, i, v):
+        if i == 0:
+            return pyo.Constraint.Skip
         # v is a machine node
         out_sum = sum(mm.u[(j, i), e] for e in data.out_edges.get(v, []))
         in_sum = sum(mm.u[(j, i), e] for e in data.in_edges.get(v, []))
@@ -394,13 +423,19 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     # ----------------------------
     # (T) Time consistency and process-transport coupling
     # ----------------------------
+    # T0: Release Date an Entry-Knoten (Ersetzt altes P7)
+    def T0_rule(mm, j):
+        v_in = get_v_in(j)
+        return mm.Arr[(j, 0), v_in] >= mm.release[j]
+    m.T0 = pyo.Constraint(m.J, rule=T0_rule)
+
     # T1: Arr at leader machine equals completion time of op
     def T1_lower(mm, j, i, mach):
         return mm.Arr[(j, i), mach] >= mm.C[(j, i)] - mm.BigM * (1 - mm.x[(j, i), mach])
     def T1_upper(mm, j, i, mach):
         return mm.Arr[(j, i), mach] <= mm.C[(j, i)] + mm.BigM * (1 - mm.x[(j, i), mach])
-    m.T1a = pyo.Constraint(m.S, m.MACH, rule=T1_lower)
-    m.T1b = pyo.Constraint(m.S, m.MACH, rule=T1_upper)
+    m.T1a = pyo.Constraint(m.O, m.MACH, rule=T1_lower)
+    m.T1b = pyo.Constraint(m.O, m.MACH, rule=T1_upper)
 
     # T2: Depart >= Arr at any node (waiting allowed)
     def T2_rule(mm, j, i, v):
@@ -432,8 +467,8 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
         return mm.g[(j, i)] >= mm.Dep[(j, i), mach] - mm.BigM * (1 - mm.x[(j, i), mach])
     def T5_upper(mm, j, i, mach):
         return mm.g[(j, i)] <= mm.Dep[(j, i), mach] + mm.BigM * (1 - mm.x[(j, i), mach])
-    m.T5a = pyo.Constraint(m.S, m.MACH, rule=T5_lower)
-    m.T5b = pyo.Constraint(m.S, m.MACH, rule=T5_upper)
+    m.T5a = pyo.Constraint(m.O, m.MACH, rule=T5_lower)
+    m.T5b = pyo.Constraint(m.O, m.MACH, rule=T5_upper)
 
     # T6: next operation cannot start before arrival at its leader machine
     def T6_ge_rule(mm, j, i, mach):
