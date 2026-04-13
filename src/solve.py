@@ -165,7 +165,7 @@ def main():
     solver = pick_solver()
 
     highs_opts = {
-        "time_limit": 20000,        # Sekunden
+        "time_limit": 300,        # Sekunden
         "mip_rel_gap": 0.01,      #  Prozent Gap
         # "mip_abs_gap": 1e-3,
         # "mip_max_nodes": 200000,

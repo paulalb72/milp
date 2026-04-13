@@ -34,6 +34,12 @@ class InstanceData:
     elig: Dict[Tuple[str, str], int]              # elig[(k,m)] in {0,1}
     ptime: Dict[Tuple[str, str], float]           # ptime[(k,m)] >=0 (only meaningful if elig=1)
 
+    # Multi-capabilities und Nachbarschaft
+    CAPS: List[str]
+    req_caps: Dict[Tuple[str, str], int]
+    has_cap: Dict[Tuple[str, str], int]
+    neighbor: Dict[Tuple[str, str], int]
+
     # Graph
     E: List[str]                                  # edge IDs
     tail: Dict[str, str]
@@ -107,29 +113,56 @@ def load_instance(json_path: str | Path) -> InstanceData:
         r[k] = int(info["coalition_size"])
 
     # Machines -> capabilities and processing times
-    # Build elig[(k,m)] and ptime[(k,m)]
     elig: Dict[Tuple[str, str], int] = {}
     ptime: Dict[Tuple[str, str], float] = {}
 
     machines = raw["machines"]
+
+    # Multi-capabilities erfassen & Strict Enforcing
+    caps_set = set()
+    if "CAPS" in raw["sets"]:
+        caps_set.update(raw["sets"]["CAPS"])
+    for m in M:
+        caps_set.update(machines[m].get("capabilities", []))
+    CAPS = sorted(list(caps_set))
+
+    has_cap: Dict[Tuple[str, str], int] = {}
+    for m in M:
+        m_caps = set(machines[m].get("capabilities", []))
+        for c in CAPS:
+            has_cap[(m, c)] = 1 if c in m_caps else 0
+
+    req_caps: Dict[Tuple[str, str], int] = {}
+    for k in K:
+        info = raw["task_types"][k]
+        
+        if "required_capabilities" not in info:
+            raise ValueError(f"Strict format enforced: 'required_capabilities' missing for task type '{k}'. Old formats are no longer supported.")
+            
+        for c in CAPS:
+            req_caps[(k, c)] = info["required_capabilities"].get(c, 0)
+
     for k in K:
         for m in M:
-            elig[(k, m)] = 0
-            ptime[(k, m)] = 0.0
-
-    for m in M:
-        caps = set(machines[m].get("capabilities", []))
-        pt = machines[m].get("processing_time", {})
-
-        for k in K:
-            if k in caps:
+            # Eligible if the machine provides at least one capability required by the task
+            can_contribute = any(req_caps[(k, c)] > 0 and has_cap[(m, c)] == 1 for c in CAPS)
+            
+            if can_contribute:
                 elig[(k, m)] = 1
+                pt = machines[m].get("processing_time", {})
                 if k not in pt:
-                    raise ValueError(f"Missing processing_time for capability: machine={m}, task={k}")
+                    raise ValueError(f"Missing processing_time: machine={m} is eligible for task={k}, but no time is defined for '{k}'")
                 ptime[(k, m)] = float(pt[k])
             else:
                 elig[(k, m)] = 0
-                ptime[(k, m)] = 0.0  # unused if elig=0
+                ptime[(k, m)] = 0.0
+
+    # Nachbarschaftsbeziehungen
+    neighbor: Dict[Tuple[str, str], int] = {}
+    for m1 in M:
+        m1_neighbors = machines[m1].get("neighbors", M)
+        for m2 in M:
+            neighbor[(m1, m2)] = 1 if m2 in m1_neighbors else 0
 
     # Arms / host binding
     arm_host: Dict[str, str] = {}
@@ -172,22 +205,25 @@ def load_instance(json_path: str | Path) -> InstanceData:
         in_edges[v].append(eid)
 
     # Basic feasibility checks (very useful for debugging)
-    # 1) coalition feasibility: for each op, enough eligible machines exist
+    # 1) coalition feasibility: check against required capabilities
     for (j, i) in ops:
         k = tau[(j, i)]
-        need = r[k]
-        eligible_m = [m for m in M if elig[(k, m)] == 1]
-        if len(eligible_m) < need:
-            raise ValueError(
-                f"Infeasible input: operation ({j},{i}) has type {k} requiring r={need}, "
-                f"but only {len(eligible_m)} machines are eligible: {eligible_m}"
-            )
+        for c in CAPS:
+            needed = req_caps[(k, c)]
+            if needed > 0:
+                capable_m = [m for m in M if has_cap[(m, c)] == 1]
+                if len(capable_m) < needed:
+                    raise ValueError(
+                        f"Infeasible input: operation ({j},{i}) of type {k} needs {needed} "
+                        f"machines with capability '{c}', but only {len(capable_m)} have it: {capable_m}"
+                    )
 
     return InstanceData(
         J=J, M=M, B=B, K=K, Arms=Arms, V=V, OUT=OUT,
         ops=ops, ops_by_job=ops_by_job, tau=tau,
         release=release, deadline=deadline,
         r=r, elig=elig, ptime=ptime,
+        CAPS=CAPS, req_caps=req_caps, has_cap=has_cap, neighbor=neighbor,
         E=E, tail=tail, head=head, delta=delta,
         edge_arm=edge_arm, arm_host=arm_host, edge_host=edge_host,
         out_edges=out_edges, in_edges=in_edges

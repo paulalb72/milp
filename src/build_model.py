@@ -99,6 +99,16 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     m.edge_arm = pyo.Param(m.E, initialize=lambda _, e: data.edge_arm[e], within=pyo.Any)
     m.edge_host = pyo.Param(m.E, initialize=lambda _, e: data.edge_host[e], within=pyo.Any)
 
+    # NEU: Parameter für Multi-Capabilities (z.B. A und C gleichzeitig)
+    if hasattr(data, "CAPS"):
+        m.CAPS = pyo.Set(initialize=data.CAPS)
+        m.req_caps = pyo.Param(m.K, m.CAPS, initialize=lambda _, k, c: data.req_caps.get((k, c), 0), within=pyo.NonNegativeIntegers)
+        m.has_cap = pyo.Param(m.MACH, m.CAPS, initialize=lambda _, mm, c: data.has_cap.get((mm, c), 0), within=pyo.Binary)
+
+    # NEU: Parameter für Nachbarschaft aus LaTeX (P8)
+    if hasattr(data, "neighbor"):
+        m.neighbor = pyo.Param(m.MACH, m.MACH, initialize=lambda _, m1, m2: data.neighbor.get((m1, m2), 0), within=pyo.Binary)
+
     BIGM = compute_bigM(data)
     m.BigM = pyo.Param(initialize=BIGM, within=pyo.PositiveReals)
 
@@ -220,18 +230,40 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
         return mm.x[(j, i), mach] <= mm.y[(j, i), mach]
     m.P2 = pyo.Constraint(m.O, m.MACH, rule=leader_in_coalition_rule)
 
-    # P3: coalition size
+    # P3: Gesamt-Koalitionsgröße (weiterhin nützlich, um nicht zu viele Maschinen zu binden)
     def coalition_size_rule(mm, j, i):
         k = mm.tau[(j, i)]
         return sum(mm.y[(j, i), mach] for mach in mm.MACH) == mm.r[k]
     m.P3 = pyo.Constraint(m.O, rule=coalition_size_rule)
 
-    # P4: eligibility
+    # NEU P3b: Multi-Capability-Abdeckung (Ein Task kann z.B. A und C benötigen)
+    def capability_mix_rule(mm, j, i, c):
+        k = mm.tau[(j, i)]
+        req = mm.req_caps[k, c]
+        if req == 0:
+            return pyo.Constraint.Skip
+        # Mindestens 'req' Maschinen in der Koalition müssen die Fähigkeit 'c' haben
+        return sum(mm.y[(j, i), mach] * mm.has_cap[mach, c] for mach in mm.MACH) >= req
+    
+    if hasattr(m, "CAPS"):
+        m.P3_caps = pyo.Constraint(m.O, m.CAPS, rule=capability_mix_rule)
+
+    # P4: Generelle Eligibility (Darf die Maschine überhaupt am Task mitarbeiten?)
     def eligibility_rule(mm, j, i, mach):
         k = mm.tau[(j, i)]
         return mm.y[(j, i), mach] <= mm.elig[k, mach]
     m.P4 = pyo.Constraint(m.O, m.MACH, rule=eligibility_rule)
 
+    # NEU P8 aus LaTeX: Räumliche Koalitionsnähe N(m)
+    # Maschine m_prime darf nur in die Koalition, wenn sie im Neighborhood N(m) des Leaders m liegt.
+    def p8_neighborhood_rule(mm, j, i, m_prime):
+        return mm.y[(j, i), m_prime] <= sum(
+            mm.x[(j, i), mach]
+            for mach in mm.MACH if mm.neighbor[mach, m_prime] == 1
+        )
+    
+    if hasattr(m, "neighbor"):
+        m.P8 = pyo.Constraint(m.O, m.MACH, rule=p8_neighborhood_rule)
     # P5: processing time determined by leader
     def proc_time_rule(mm, j, i):
         k = mm.tau[(j, i)]

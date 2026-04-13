@@ -3,7 +3,7 @@
     "J": ["J1", "J2", "J3"],
     "M": ["M1", "M2", "M3", "M4"],
     "B": ["B1"],
-    "K": ["A", "B"],
+    "K": ["task1", "task2"],
     "A": ["arm_M1", "arm_M2", "arm_M4"],
     "V_out": "OUT"
   },
@@ -14,8 +14,8 @@
       "release": 0,
       "deadline": 100,
       "operations": [
-        { "op_index": 1, "task_type": "A" },
-        { "op_index": 2, "task_type": "B" }
+        { "op_index": 1, "task_type": "task1" },
+        { "op_index": 2, "task_type": "task2" }
       ]
     },
     {
@@ -23,8 +23,8 @@
       "release": 0,
       "deadline": 100,
       "operations": [
-        { "op_index": 1, "task_type": "A" },
-        { "op_index": 2, "task_type": "A" }
+        { "op_index": 1, "task_type": "task1" },
+        { "op_index": 2, "task_type": "task1" }
       ]
     },
     {
@@ -32,44 +32,51 @@
       "release": 2,
       "deadline": 120,
       "operations": [
-        { "op_index": 1, "task_type": "B" },
-        { "op_index": 2, "task_type": "B" }
+        { "op_index": 1, "task_type": "task2" },
+        { "op_index": 2, "task_type": "task2" }
       ]
     }
   ],
 
   "task_types": {
-    "A": {
+    "task1": {
       "coalition_size": 2,
-      "description": "needs 2 machines simultaneously"
+      "description": "needs capability A and B simultaneously",
+      "required_capabilities": {
+        "A": 1,
+        "B": 1
+      }
     },
-    "B": {
+    "task2": {
       "coalition_size": 1,
-      "description": "needs 1 machine"
+      "description": "needs capability A",
+      "required_capabilities": {
+        "A": 1
+      }
     }
   },
 
   "machines": {
     "M1": {
       "capabilities": ["A"],
-      "processing_time": { "A": 6 },
+      "processing_time": { "task1": 6, "task2": 6 },
       "has_arm": true,
       "arm_id": "arm_M1"
     },
     "M2": {
       "capabilities": ["A", "B"],
-      "processing_time": { "A": 5, "B": 4 },
+      "processing_time": { "task1": 5, "task2": 4 },
       "has_arm": true,
       "arm_id": "arm_M2"
     },
     "M3": {
       "capabilities": ["B"],
-      "processing_time": { "B": 3 },
+      "processing_time": { "task1": 3 },
       "has_arm": false
     },
     "M4": {
       "capabilities": ["B"],
-      "processing_time": { "B": 2 },
+      "processing_time": { "task1": 2 },
       "has_arm": true,
       "arm_id": "arm_M4"
     }
