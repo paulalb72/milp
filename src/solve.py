@@ -97,8 +97,8 @@ def extract_solution(data, model) -> dict:
                     "tail": data.tail[e],
                     "head": data.head[e],
                     "delta": data.delta[e],
-                    "arm": data.edge_arm[e],
-                    "host": data.edge_host[e],
+                    "arms": data.edge_arms[e],
+                    "hosts": data.edge_hosts[e],
                     "S": float(pyo.value(model.Sedge[(j, i), e]))
                 })
         transfers[f"{j}:{i}"] = used
@@ -145,7 +145,7 @@ def write_human_readable(data, sol: dict) -> str:
         for e in edges:
             lines.append(
                 f"  {e['edge_id']}: {e['tail']} -> {e['head']}  "
-                f"delta={e['delta']}  arm={e['arm']} host={e['host']}  S={e['S']:.3f}"
+                f"delta={e['delta']}  arms={e['arms']} hosts={e['hosts']}  S={e['S']:.3f}"
             )
 
     lines.append("\n=== COMPLETION AT OUT ===")

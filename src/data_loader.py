@@ -49,9 +49,9 @@ class InstanceData:
     tail: Dict[str, str]
     head: Dict[str, str]
     delta: Dict[str, float]
-    edge_arm: Dict[str, str]                      # arm serving edge
+    edge_arms: Dict[str, List[str]]               # arms serving edge
     arm_host: Dict[str, str]                      # host machine of arm
-    edge_host: Dict[str, str]                     # host(edge) = host(arm(edge))
+    edge_hosts: Dict[str, List[str]]              # hosts(edge) = hosts(arms(edge))
 
     # Convenience adjacency
     out_edges: Dict[str, List[str]]               # out_edges[v] = [e ...]
@@ -188,8 +188,8 @@ def load_instance(json_path: str | Path) -> InstanceData:
     tail: Dict[str, str] = {}
     head: Dict[str, str] = {}
     delta: Dict[str, float] = {}
-    edge_arm: Dict[str, str] = {}
-    edge_host: Dict[str, str] = {}
+    edge_arms: Dict[str, List[str]] = {}
+    edge_hosts: Dict[str, List[str]] = {}
 
     for e in raw["graph"]["edges"]:
         eid = e["edge_id"]
@@ -197,12 +197,19 @@ def load_instance(json_path: str | Path) -> InstanceData:
         tail[eid] = e["tail"]
         head[eid] = e["head"]
         delta[eid] = float(e["delta"])
-        edge_arm[eid] = e["served_by_arm"]
 
-        a = edge_arm[eid]
-        if a not in arm_host:
-            raise ValueError(f"Edge {eid} uses arm {a}, but arms[{a}] is not defined in JSON.")
-        edge_host[eid] = arm_host[a]
+        arm_val = e.get("served_by_arm", [])
+        if isinstance(arm_val, str):
+            arm_val = [arm_val]
+        edge_arms[eid] = arm_val
+
+        hosts = []
+        for a in arm_val:
+            if a not in arm_host:
+                raise ValueError(f"Edge {eid} uses arm {a}, but arms[{a}] is not defined in JSON.")
+            if arm_host[a] not in hosts:
+                hosts.append(arm_host[a])
+        edge_hosts[eid] = hosts
 
     # Build adjacency lists
     out_edges: Dict[str, List[str]] = {v: [] for v in V}
@@ -239,6 +246,6 @@ def load_instance(json_path: str | Path) -> InstanceData:
         r=r, elig=elig, ptime=ptime,
         CAPS=CAPS, req_caps=req_caps, has_cap=has_cap, neighbor=neighbor,
         E=E, tail=tail, head=head, delta=delta,
-        edge_arm=edge_arm, arm_host=arm_host, edge_host=edge_host,
+        edge_arms=edge_arms, arm_host=arm_host, edge_hosts=edge_hosts,
         out_edges=out_edges, in_edges=in_edges
     )

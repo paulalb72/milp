@@ -100,8 +100,8 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     m.head = pyo.Param(m.E, initialize=lambda _, e: data.head[e], within=pyo.Any)
     m.delta = pyo.Param(m.E, initialize=lambda _, e: float(data.delta[e]), within=pyo.NonNegativeReals)
 
-    m.edge_arm = pyo.Param(m.E, initialize=lambda _, e: data.edge_arm[e], within=pyo.Any)
-    m.edge_host = pyo.Param(m.E, initialize=lambda _, e: data.edge_host[e], within=pyo.Any)
+    # We will use data.edge_arms and data.edge_hosts directly in the constraints
+    # instead of defining Pyomo sets for them to keep the rules simple.
 
     # NEU: Parameter für Multi-Capabilities (z.B. A und C gleichzeitig)
     if hasattr(data, "CAPS"):
@@ -171,7 +171,7 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
         for b_idx in range(a_idx + 1, len(alpha_list)):
             aj, ai, ae = alpha_list[a_idx]
             bj, bi, be = alpha_list[b_idx]
-            if data.edge_arm[ae] == data.edge_arm[be]:
+            if set(data.edge_arms[ae]).intersection(data.edge_arms[be]):
                 alpha_pairs.append((aj, ai, ae, bj, bi, be))
     m.PAIR_A = pyo.Set(dimen=6, initialize=alpha_pairs)
     m.q_arm = pyo.Var(m.PAIR_A, domain=pyo.Binary)
@@ -185,6 +185,12 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
                 mix_pairs.append((oj, oi, sj, si, e))
     m.MIX = pyo.Set(dimen=5, initialize=mix_pairs)
     m.q_mix = pyo.Var(m.MIX, domain=pyo.Binary)
+
+    mix_host_pairs = []
+    for (oj, oi, sj, si, e) in mix_pairs:
+        for m_host in data.edge_hosts[e]:
+            mix_host_pairs.append((oj, oi, sj, si, e, m_host))
+    m.MIX_HOST = pyo.Set(dimen=6, initialize=mix_host_pairs)
 
     # Buffer visit indicator
     m.z = pyo.Var(m.S, m.BUF, domain=pyo.Binary)
@@ -520,16 +526,14 @@ def build_model(data: InstanceData) -> pyo.ConcreteModel:
     #
     # Activated only if:
     #   machine host participates in operation o (y[o,host]=1) AND transfer alpha is used (u[alpha]=1)
-    def A2a_rule(mm, oj, oi, sj, si, e):
-        host = data.edge_host[e]
-        return mm.rfree[(oj, oi), host] <= mm.Sedge[(sj, si), e] + mm.BigM * (1 - mm.q_mix[(oj, oi, sj, si, e)]) + mm.BigM * (2 - mm.y[(oj, oi), host] - mm.u[(sj, si), e])
+    def A2a_rule(mm, oj, oi, sj, si, e, m_host):
+        return mm.rfree[(oj, oi), m_host] <= mm.Sedge[(sj, si), e] + mm.BigM * (1 - mm.q_mix[(oj, oi, sj, si, e)]) + mm.BigM * (2 - mm.y[(oj, oi), m_host] - mm.u[(sj, si), e])
 
-    def A2b_rule(mm, oj, oi, sj, si, e):
-        host = data.edge_host[e]
-        return mm.Sedge[(sj, si), e] + mm.delta[e] <= mm.t[(oj, oi)] + mm.BigM * (mm.q_mix[(oj, oi, sj, si, e)]) + mm.BigM * (2 - mm.y[(oj, oi), host] - mm.u[(sj, si), e])
+    def A2b_rule(mm, oj, oi, sj, si, e, m_host):
+        return mm.Sedge[(sj, si), e] + mm.delta[e] <= mm.t[(oj, oi)] + mm.BigM * (mm.q_mix[(oj, oi, sj, si, e)]) + mm.BigM * (2 - mm.y[(oj, oi), m_host] - mm.u[(sj, si), e])
 
-    m.A2a = pyo.Constraint(m.MIX, rule=A2a_rule)
-    m.A2b = pyo.Constraint(m.MIX, rule=A2b_rule)
+    m.A2a = pyo.Constraint(m.MIX_HOST, rule=A2a_rule)
+    m.A2b = pyo.Constraint(m.MIX_HOST, rule=A2b_rule)
 
     # ----------------------------
     # (B) Buffer capacity: capacity 1 via interval non-overlap

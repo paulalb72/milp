@@ -116,77 +116,77 @@
         "tail": "IN1",
         "head": "M1",
         "delta": 1,
-        "served_by_arm": "arm_M1"
+        "served_by_arm": ["arm_M1"]
       },
       {
         "edge_id": "e_IN1_M2",
         "tail": "IN1",
         "head": "M2",
         "delta": 1,
-        "served_by_arm": "arm_M2"
+        "served_by_arm": ["arm_M2"]
       },
       {
         "edge_id": "e_IN2_M1",
         "tail": "IN2",
         "head": "M1",
         "delta": 1,
-        "served_by_arm": "arm_M1"
+        "served_by_arm": ["arm_M1"]
       },
       {
         "edge_id": "e_IN2_M4",
         "tail": "IN2",
         "head": "M4",
         "delta": 1,
-        "served_by_arm": "arm_M4"
+        "served_by_arm": ["arm_M4"]
       },
       {
         "edge_id": "e_M1_B1",
         "tail": "M1",
         "head": "B1",
         "delta": 1,
-        "served_by_arm": "arm_M1"
+        "served_by_arm": ["arm_M1", "arm_M2"]
       },
       {
         "edge_id": "e_M2_B1",
         "tail": "M2",
         "head": "B1",
         "delta": 1,
-        "served_by_arm": "arm_M2"
+        "served_by_arm": ["arm_M1", "arm_M2"]
       },
       {
         "edge_id": "e_B1_M2",
         "tail": "B1",
         "head": "M2",
         "delta": 1,
-        "served_by_arm": "arm_M2"
+        "served_by_arm": ["arm_M1", "arm_M2"]
       },
       {
         "edge_id": "e_B1_M3",
         "tail": "B1",
         "head": "M3",
         "delta": 2,
-        "served_by_arm": "arm_M2"
+        "served_by_arm": ["arm_M2"]
       },
       {
         "edge_id": "e_M2_OUT",
         "tail": "M2",
         "head": "OUT",
         "delta": 1,
-        "served_by_arm": "arm_M2"
+        "served_by_arm": ["arm_M2"]
       },
       {
         "edge_id": "e_M3_OUT",
         "tail": "M3",
         "head": "OUT",
         "delta": 1,
-        "served_by_arm": "arm_M2"
+        "served_by_arm": ["arm_M2"]
       },
       {
         "edge_id": "e_M4_OUT",
         "tail": "M4",
         "head": "OUT",
         "delta": 1,
-        "served_by_arm": "arm_M4"
+        "served_by_arm": ["arm_M4"]
       }
     ]
   },

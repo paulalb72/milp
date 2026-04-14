@@ -83,10 +83,10 @@ def render_gantt(data: Any, solution: Dict[str, Any], out_dir: Path) -> Path:
             machines.add(m)
     for stage_key, edges in transfers.items():
         for e in edges:
-            if "arm" in e:
-                arms.add(e["arm"])
-            if "host" in e:
-                machines.add(e["host"])
+            for arm in e.get("arms", []):
+                arms.add(arm)
+            for host in e.get("hosts", []):
+                machines.add(host)
 
     # Infer buffers/entries from routing if not in machines and not OUT
     for stage_key, edges in transfers.items():
@@ -138,17 +138,17 @@ def render_gantt(data: Any, solution: Dict[str, Any], out_dir: Path) -> Path:
             delta = float(e["delta"])
             end = S + delta
 
-            arm = e.get("arm")
-            host = e.get("host")
             eid = e.get("edge_id", "edge")
 
             # Arm busy on [S, S+delta]
-            if arm in arm_intervals:
-                arm_intervals[arm].append((S, end, f"{stage_key} {eid}"))
+            for arm in e.get("arms", []):
+                if arm in arm_intervals:
+                    arm_intervals[arm].append((S, end, f"{stage_key} {eid}"))
 
             # Host machine busy during transfer on [S, S+delta]
-            if host in machine_intervals:
-                machine_intervals[host].append((S, end, f"{stage_key} arm-use"))
+            for host in e.get("hosts", []):
+                if host in machine_intervals:
+                    machine_intervals[host].append((S, end, f"{stage_key} arm-use"))
 
         # Buffer occupancy: for a buffer node b visited, occupied from arrival to departure
         # arrival at node = (prev S + prev delta), departure from node = (next S)
