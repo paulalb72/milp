@@ -67,7 +67,7 @@ def load_instance(json_path: str | Path) -> InstanceData:
       - task_types define coalition_size r_k
       - machines define capabilities -> elig matrix a_{k,m}
       - graph edges define allowed transfers with durations delta_e
-      - arms define host-machine binding, edge_host(e) = host(arm(e))
+      - arms define host-machine binding, edge_hosts(e) = hosts(arms(e))
     """
     path = Path(json_path)
     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -183,6 +183,14 @@ def load_instance(json_path: str | Path) -> InstanceData:
         for a, info in raw["arms"].items():
             arm_host[a] = info["host_machine"]
 
+    station_arm: Dict[str, str] = {}
+    for a, host in arm_host.items():
+        station_arm[host] = a
+    for m in M:
+        arm_id = machines[m].get("arm_id")
+        if machines[m].get("has_arm", False) and arm_id:
+            station_arm[m] = arm_id
+
     # Graph edges
     E: List[str] = []
     tail: Dict[str, str] = {}
@@ -198,10 +206,23 @@ def load_instance(json_path: str | Path) -> InstanceData:
         head[eid] = e["head"]
         delta[eid] = float(e["delta"])
 
-        arm_val = e.get("served_by_arm", [])
+        arm_val = e.get("served_by_arms", e.get("served_by_arm", []))
         if isinstance(arm_val, str):
             arm_val = [arm_val]
         edge_arms[eid] = arm_val
+
+        tail_arm = station_arm.get(tail[eid])
+        head_arm = station_arm.get(head[eid])
+        if not tail_arm and not head_arm:
+            raise ValueError(
+                "Datengrundlage nicht valide, es dürfen keine Kanten existieren, "
+                "bei denen weder tail noch head einen Arm haben"
+            )
+        if tail_arm and head_arm and not {tail_arm, head_arm}.issubset(set(arm_val)):
+            raise ValueError(
+                "Datengrundlage nicht valide, wenn zwei verbundene Stationen jeweils einen Arm haben, "
+                "müssen diese auf der Verbindungsstrecke der Stationen beide genannt werden"
+            )
 
         hosts = []
         for a in arm_val:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +39,70 @@ def load_solution(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def unique_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def as_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def edge_hosts(edge: dict[str, Any]) -> list[str]:
+    return as_list(edge.get("hosts", edge.get("host")))
+
+
+def load_instance_graph(path: Path) -> dict[str, Any]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    sets = raw.get("sets", {})
+    arm_hosts = {
+        str(arm_id): str(info.get("host_machine"))
+        for arm_id, info in raw.get("arms", {}).items()
+    }
+
+    edges: list[dict[str, Any]] = []
+    for edge in raw.get("graph", {}).get("edges", []):
+        arms = as_list(edge.get("served_by_arms", edge.get("served_by_arm")))
+        hosts = unique_preserve_order([arm_hosts[arm] for arm in arms if arm in arm_hosts])
+        edges.append(
+            {
+                "edge_id": str(edge["edge_id"]),
+                "tail": str(edge["tail"]),
+                "head": str(edge["head"]),
+                "delta": float(edge.get("delta", 0.0)),
+                "arms": arms,
+                "hosts": hosts,
+            }
+        )
+
+    return {
+        "machines": [str(item) for item in sets.get("M", [])],
+        "entry_nodes": [str(item) for item in sets.get("V_in", [])],
+        "buffers": [str(item) for item in sets.get("B", [])],
+        "out_nodes": [str(sets.get("V_out", "OUT"))],
+        "edges": edges,
+    }
+
+
+def default_data_path_for_solution(solution_path: Path) -> Path | None:
+    parts = solution_path.parts
+    if len(parts) >= 3 and parts[-1] == "solution.json" and parts[-3] == "outputs":
+        candidate = Path(f"{parts[-2]}.json")
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def order_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not edges:
         return []
@@ -68,7 +133,10 @@ def order_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ordered
 
 
-def infer_resources(solution: dict[str, Any]) -> tuple[list[str], list[str], list[str], list[dict[str, Any]]]:
+def infer_resources(
+    solution: dict[str, Any],
+    instance_graph: dict[str, Any] | None = None,
+) -> tuple[list[str], list[str], list[str], list[str], list[dict[str, Any]]]:
     leaders = solution.get("leaders", {})
     coalitions = solution.get("coalitions", {})
     transfers = solution.get("transfers", {})
@@ -76,16 +144,39 @@ def infer_resources(solution: dict[str, Any]) -> tuple[list[str], list[str], lis
     machines: set[str] = set()
     nodes: set[str] = {"OUT"}
     used_edges: dict[str, dict[str, Any]] = {}
+    graph_edges: dict[str, dict[str, Any]] = {}
+    indegree: dict[str, int] = defaultdict(int)
+    outdegree: dict[str, int] = defaultdict(int)
+
+    entry_order: list[str] = []
+    buffer_order: list[str] = []
+    out_order: list[str] = ["OUT"]
+    machine_order: list[str] = []
+
+    if instance_graph is not None:
+        machine_order.extend(instance_graph.get("machines", []))
+        entry_order.extend(instance_graph.get("entry_nodes", []))
+        buffer_order.extend(instance_graph.get("buffers", []))
+        out_order = list(instance_graph.get("out_nodes", ["OUT"]))
+        machines.update(machine_order)
+        nodes.update(machine_order)
+        nodes.update(entry_order)
+        nodes.update(buffer_order)
+        nodes.update(out_order)
+        for edge in instance_graph.get("edges", []):
+            graph_edges[edge["edge_id"]] = edge
 
     for leader in leaders.values():
         if leader:
             machines.add(leader)
             nodes.add(leader)
+            machine_order.append(leader)
 
     for team in coalitions.values():
         for machine in team:
             machines.add(machine)
             nodes.add(machine)
+            machine_order.append(machine)
 
     for edges in transfers.values():
         for edge in edges:
@@ -93,13 +184,41 @@ def infer_resources(solution: dict[str, Any]) -> tuple[list[str], list[str], lis
             used_edges[edge_id] = edge
             nodes.add(edge["tail"])
             nodes.add(edge["head"])
-            host = edge.get("host")
-            if host:
+            outdegree[str(edge["tail"])] += 1
+            indegree[str(edge["head"])] += 1
+            for host in edge_hosts(edge):
                 machines.add(host)
                 nodes.add(host)
+                machine_order.append(host)
 
-    buffers = sorted(node for node in nodes if node not in machines and node != "OUT")
-    return sorted(machines), buffers, ["OUT"], list(used_edges.values())
+    all_edges = dict(graph_edges)
+    all_edges.update({edge_id: edge for edge_id, edge in used_edges.items() if edge_id not in all_edges})
+    for edge in all_edges.values():
+        nodes.add(edge["tail"])
+        nodes.add(edge["head"])
+        outdegree[str(edge["tail"])] += 1
+        indegree[str(edge["head"])] += 1
+        for host in edge_hosts(edge):
+            machines.add(host)
+            nodes.add(host)
+            machine_order.append(host)
+
+    if instance_graph is None:
+        entry_order.extend(
+            sorted(
+                node
+                for node in nodes
+                if node not in machines and node != "OUT" and outdegree[node] > 0 and indegree[node] == 0
+            )
+        )
+
+    out_nodes = unique_preserve_order(out_order)
+    entry_nodes = unique_preserve_order(entry_order)
+    buffers = unique_preserve_order(
+        buffer_order
+        + sorted(node for node in nodes if node not in machines and node not in out_nodes and node not in entry_nodes)
+    )
+    return unique_preserve_order(machine_order + sorted(machines)), entry_nodes, buffers, out_nodes, list(all_edges.values())
 
 
 def build_stage_infos(solution: dict[str, Any]) -> tuple[dict[str, list[StageInfo]], float]:
@@ -139,23 +258,213 @@ def build_stage_infos(solution: dict[str, Any]) -> tuple[dict[str, list[StageInf
     return dict(stages_by_job), max(horizon, 1.0)
 
 
+def build_initial_transfers(solution: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    initial_transfers: dict[str, list[dict[str, Any]]] = {}
+    for stage_key, edges in solution.get("transfers", {}).items():
+        job, op_index = parse_stage_key(stage_key)
+        if op_index == 0:
+            initial_transfers[job] = order_edges(edges)
+    return initial_transfers
+
+
 def evenly_spaced_positions(count: int) -> list[float]:
     if count <= 1:
         return [0.5]
     return [0.85 - index * (0.70 / (count - 1)) for index in range(count)]
 
 
-def layout_nodes(machines: list[str], buffers: list[str], out_nodes: list[str]) -> dict[str, tuple[float, float]]:
+def staggered_machine_positions(count: int, column_index: int) -> list[float]:
+    if count <= 0:
+        return []
+
+    offsets = [0.08, -0.10, 0.00]
+    if count == 1:
+        return [max(0.10, min(0.90, 0.5 + offsets[column_index % len(offsets)]))]
+
+    base_positions = evenly_spaced_positions(count)
+    return [
+        max(0.10, min(0.90, y + offsets[column_index % len(offsets)]))
+        for y in base_positions
+    ]
+
+
+def machine_links(
+    machines: list[str],
+    graph_edges: list[dict[str, Any]],
+) -> tuple[dict[tuple[str, str], float], dict[str, set[str]]]:
+    machine_set = set(machines)
+    links: dict[tuple[str, str], float] = {}
+    neighbors: dict[str, set[str]] = {machine: set() for machine in machines}
+
+    for edge in graph_edges:
+        tail = str(edge["tail"])
+        head = str(edge["head"])
+        if tail not in machine_set or head not in machine_set or tail == head:
+            continue
+
+        a, b = sorted((tail, head))
+        links[(a, b)] = links.get((a, b), 0.0) + 1.0
+        neighbors[a].add(b)
+        neighbors[b].add(a)
+
+    return links, neighbors
+
+
+def fallback_machine_layout(machines: list[str]) -> dict[str, tuple[float, float]]:
+    positions: dict[str, tuple[float, float]] = {}
+    machine_columns = [0.20, 0.43, 0.66]
+    machine_groups = [machines[index::len(machine_columns)] for index in range(len(machine_columns))]
+    for column_index, (column_x, group) in enumerate(zip(machine_columns, machine_groups)):
+        for machine, y in zip(group, staggered_machine_positions(len(group), column_index)):
+            positions[machine] = (column_x, y)
+    return positions
+
+
+def degree_aware_machine_layout(
+    machines: list[str],
+    graph_edges: list[dict[str, Any]],
+) -> dict[str, tuple[float, float]]:
+    links, neighbors = machine_links(machines, graph_edges)
+    if not links:
+        return fallback_machine_layout(machines)
+
+    degree = {machine: len(neighbors[machine]) for machine in machines}
+    max_degree = max(max(degree.values()), 1)
+    ordered = sorted(machines, key=lambda item: (-degree[item], item))
+
+    x_min, x_max = 0.14, 0.66
+    y_min, y_max = 0.11, 0.89
+    center = (0.46, 0.50)
     positions: dict[str, tuple[float, float]] = {}
 
-    for machine, y in zip(machines, evenly_spaced_positions(len(machines))):
-        positions[machine] = (0.16, y)
+    for index, machine in enumerate(ordered):
+        centrality = degree[machine] / max_degree
+        if index == 0:
+            positions[machine] = center
+            continue
+
+        angle = -math.pi / 2 + 2 * math.pi * (index - 1) / max(len(ordered) - 1, 1)
+        radius = 0.20 + 0.18 * (1.0 - centrality)
+        x = center[0] + math.cos(angle) * radius * 1.15
+        y = center[1] + math.sin(angle) * radius
+        positions[machine] = (
+            max(x_min, min(x_max, x)),
+            max(y_min, min(y_max, y)),
+        )
+
+    area = (x_max - x_min) * (y_max - y_min)
+    ideal_distance = math.sqrt(area / max(len(machines), 1)) * 0.85
+    temperature = 0.055
+
+    for iteration in range(180):
+        displacement = {machine: [0.0, 0.0] for machine in machines}
+
+        for left_index, left in enumerate(machines):
+            left_x, left_y = positions[left]
+            for right in machines[left_index + 1:]:
+                right_x, right_y = positions[right]
+                dx = left_x - right_x
+                dy = left_y - right_y
+                distance = max(math.hypot(dx, dy), 1e-6)
+                force = (ideal_distance * ideal_distance) / distance
+                ux = dx / distance
+                uy = dy / distance
+                displacement[left][0] += ux * force
+                displacement[left][1] += uy * force
+                displacement[right][0] -= ux * force
+                displacement[right][1] -= uy * force
+
+        for (left, right), weight in links.items():
+            left_x, left_y = positions[left]
+            right_x, right_y = positions[right]
+            dx = right_x - left_x
+            dy = right_y - left_y
+            distance = max(math.hypot(dx, dy), 1e-6)
+            force = (distance * distance / ideal_distance) * min(weight, 2.0)
+            ux = dx / distance
+            uy = dy / distance
+            displacement[left][0] += ux * force
+            displacement[left][1] += uy * force
+            displacement[right][0] -= ux * force
+            displacement[right][1] -= uy * force
+
+        for machine in machines:
+            x, y = positions[machine]
+            centrality = degree[machine] / max_degree
+            center_pull = 0.10 * centrality
+            displacement[machine][0] += (center[0] - x) * center_pull
+            displacement[machine][1] += (center[1] - y) * center_pull
+
+            radial_x = x - center[0]
+            radial_y = y - center[1]
+            radial_distance = max(math.hypot(radial_x, radial_y), 1e-6)
+            target_radius = 0.13 + 0.27 * (1.0 - centrality)
+            shell_force = (target_radius - radial_distance) * 0.05
+            displacement[machine][0] += (radial_x / radial_distance) * shell_force
+            displacement[machine][1] += (radial_y / radial_distance) * shell_force
+
+        cooling = temperature * (1.0 - iteration / 180)
+        for machine in machines:
+            dx, dy = displacement[machine]
+            distance = max(math.hypot(dx, dy), 1e-6)
+            step = min(distance, cooling)
+            x, y = positions[machine]
+            positions[machine] = (
+                max(x_min, min(x_max, x + dx / distance * step)),
+                max(y_min, min(y_max, y + dy / distance * step)),
+            )
+
+    for machine in machines:
+        centrality = degree[machine] / max_degree
+        blend = 0.75 * centrality * centrality
+        x, y = positions[machine]
+        positions[machine] = (
+            max(x_min, min(x_max, x * (1.0 - blend) + center[0] * blend)),
+            max(y_min, min(y_max, y * (1.0 - blend) + center[1] * blend)),
+        )
+
+    return positions
+
+
+def layout_nodes(
+    entry_nodes: list[str],
+    machines: list[str],
+    buffers: list[str],
+    out_nodes: list[str],
+    graph_edges: list[dict[str, Any]],
+) -> dict[str, tuple[float, float]]:
+    positions: dict[str, tuple[float, float]] = {}
+
+    for entry_name, y in zip(entry_nodes, evenly_spaced_positions(len(entry_nodes))):
+        positions[entry_name] = (0.02, y)
+
+    positions.update(degree_aware_machine_layout(machines, graph_edges))
 
     for buffer_name, y in zip(buffers, evenly_spaced_positions(len(buffers))):
-        positions[buffer_name] = (0.52, y)
+        positions[buffer_name] = (0.88, y)
 
     for out_name, y in zip(out_nodes, evenly_spaced_positions(len(out_nodes))):
-        positions[out_name] = (0.86, y)
+        positions[out_name] = (1.06, y)
+
+    fixed_nodes = entry_nodes + buffers + out_nodes
+    for machine in machines:
+        machine_x, machine_y = positions[machine]
+        for node_name in fixed_nodes:
+            node_x, node_y = positions[node_name]
+            if abs(machine_y - node_y) > 0.13:
+                continue
+
+            min_gap = 0.17 if node_name in buffers else 0.15
+            if abs(machine_x - node_x) >= min_gap:
+                continue
+
+            if machine_x < node_x:
+                machine_x = min(machine_x, node_x - min_gap)
+            else:
+                machine_x = max(machine_x, node_x + min_gap)
+            machine_x = max(0.14, min(0.66, machine_x))
+
+        positions[machine] = (machine_x, machine_y)
 
     return positions
 
@@ -173,8 +482,83 @@ def lerp(start: tuple[float, float], end: tuple[float, float], alpha: float) -> 
     )
 
 
+def compact_edge_label(edge: dict[str, Any]) -> str:
+    return f"{edge['tail']}->{edge['head']}"
+
+
+def label_box(label: str, x: float, y: float) -> tuple[float, float, float, float]:
+    width = 0.010 * len(label) + 0.018
+    height = 0.035
+    return (x - width / 2, y - height / 2, x + width / 2, y + height / 2)
+
+
+def boxes_overlap(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    padding: float = 0.010,
+) -> bool:
+    return not (
+        left[2] + padding < right[0]
+        or right[2] + padding < left[0]
+        or left[3] + padding < right[1]
+        or right[3] + padding < left[1]
+    )
+
+
+def edge_label_position(
+    edge: dict[str, Any],
+    start: tuple[float, float],
+    end: tuple[float, float],
+    lane_index: int,
+    lane_count: int,
+    occupied_boxes: list[tuple[float, float, float, float]],
+) -> tuple[float, float]:
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    length = max(math.hypot(dx, dy), 1e-6)
+    perp = (-dy / length, dx / length)
+    label = compact_edge_label(edge)
+
+    lane_offset = (lane_index - (lane_count - 1) / 2) * 0.050
+    base = lerp(start, end, 0.5)
+    candidate_steps = [
+        (lane_offset, 0.000),
+        (lane_offset + 0.040, 0.018),
+        (lane_offset - 0.040, -0.018),
+        (lane_offset + 0.080, 0.032),
+        (lane_offset - 0.080, -0.032),
+        (lane_offset + 0.120, 0.048),
+        (lane_offset - 0.120, -0.048),
+        (lane_offset + 0.160, 0.064),
+        (lane_offset - 0.160, -0.064),
+    ]
+
+    best_x = base[0] + perp[0] * lane_offset
+    best_y = base[1] + perp[1] * lane_offset + 0.025
+    fewest_overlaps = len(occupied_boxes) + 1
+
+    for normal_offset, vertical_offset in candidate_steps:
+        x = base[0] + perp[0] * normal_offset
+        y = base[1] + perp[1] * normal_offset + 0.025 + vertical_offset
+        x = max(-0.03, min(1.10, x))
+        y = max(0.05, min(0.95, y))
+        box = label_box(label, x, y)
+        overlaps = sum(1 for occupied in occupied_boxes if boxes_overlap(box, occupied))
+        if overlaps == 0:
+            occupied_boxes.append(box)
+            return x, y
+        if overlaps < fewest_overlaps:
+            best_x = x
+            best_y = y
+            fewest_overlaps = overlaps
+
+    occupied_boxes.append(label_box(label, best_x, best_y))
+    return best_x, best_y
+
+
 def job_state_at(
     stages_by_job: dict[str, list[StageInfo]],
+    initial_transfers: dict[str, list[dict[str, Any]]],
     job: str,
     current_time: float,
     positions: dict[str, tuple[float, float]],
@@ -182,7 +566,72 @@ def job_state_at(
 ) -> dict[str, Any]:
     stages = stages_by_job[job]
     first_stage = stages[0]
+    initial_edges = initial_transfers.get(job, [])
     if current_time < first_stage.start:
+        if initial_edges:
+            first_edge = initial_edges[0]
+            first_start = float(first_edge["S"])
+
+            if current_time < first_start:
+                entry_node = first_edge["tail"]
+                return {
+                    "position": positions[entry_node],
+                    "state": f"{job}:0 waiting on {entry_node}",
+                    "group": entry_node,
+                    "node": entry_node,
+                    "edge_id": None,
+                    "active_stage": f"{job}:0",
+                    "active_coalition": [],
+                    "machine_roles": [],
+                }
+
+            for index, edge in enumerate(initial_edges):
+                edge_start = float(edge["S"])
+                edge_end = edge_start + float(edge["delta"])
+                tail_pos = positions[edge["tail"]]
+                head_pos = positions[edge["head"]]
+
+                if edge_start <= current_time < edge_end:
+                    alpha = (current_time - edge_start) / max(float(edge["delta"]), 1e-9)
+                    return {
+                        "position": lerp(tail_pos, head_pos, alpha),
+                        "state": f"{job}:0 transfer {edge['tail']} -> {edge['head']}",
+                        "group": edge["edge_id"],
+                        "node": None,
+                        "edge_id": edge["edge_id"],
+                        "active_stage": f"{job}:0",
+                        "active_coalition": [],
+                        "machine_roles": [(host, "arm-use") for host in edge_hosts(edge)],
+                    }
+
+                next_start = first_stage.start
+                if index + 1 < len(initial_edges):
+                    next_start = float(initial_edges[index + 1]["S"])
+
+                if edge_end <= current_time < next_start:
+                    return {
+                        "position": positions[edge["head"]],
+                        "state": f"{job}:0 waiting on {edge['head']}",
+                        "group": edge["head"],
+                        "node": edge["head"],
+                        "edge_id": None,
+                        "active_stage": f"{job}:0",
+                        "active_coalition": [],
+                        "machine_roles": [],
+                    }
+
+            last_head = initial_edges[-1]["head"]
+            return {
+                "position": positions[last_head],
+                "state": f"{job}:0 waiting for {first_stage.stage_key} on {last_head}",
+                "group": last_head,
+                "node": last_head,
+                "edge_id": None,
+                "active_stage": f"{job}:0",
+                "active_coalition": [],
+                "machine_roles": [],
+            }
+
         return {
             "position": positions[first_stage.leader],
             "state": f"waiting for release on {first_stage.leader}",
@@ -256,7 +705,7 @@ def job_state_at(
                     "edge_id": edge["edge_id"],
                     "active_stage": stage.stage_key,
                     "active_coalition": [],
-                    "machine_roles": [(edge["host"], "arm-use")] if edge.get("host") else [],
+                    "machine_roles": [(host, "arm-use") for host in edge_hosts(edge)],
                 }
 
             next_start = stage.stage_end
@@ -326,6 +775,7 @@ def collect_machine_activity(states: dict[str, dict[str, Any]], machines: list[s
 def build_timeline_axes(
     timeline_ax: Any,
     stages_by_job: dict[str, list[StageInfo]],
+    initial_transfers: dict[str, list[dict[str, Any]]],
     colors: dict[str, Any],
     horizon: float,
 ) -> tuple[Line2D, list[Patch]]:
@@ -334,6 +784,17 @@ def build_timeline_axes(
 
     for job in jobs:
         y = row_map[job]
+        for edge in initial_transfers.get(job, []):
+            timeline_ax.barh(
+                y - 0.15,
+                float(edge["delta"]),
+                left=float(edge["S"]),
+                height=0.18,
+                color=colors[job],
+                edgecolor="black",
+                alpha=0.55,
+                hatch="//",
+            )
         for stage in stages_by_job[job]:
             timeline_ax.barh(
                 y + 0.12,
@@ -373,17 +834,29 @@ def build_timeline_axes(
     return time_cursor, legend
 
 
-def render_animation(solution: dict[str, Any], out_path: Path, fps: int, time_step: float) -> Path:
+def render_animation(
+    solution: dict[str, Any],
+    out_path: Path,
+    fps: int,
+    time_step: float,
+    playback_speed: float,
+    instance_graph: dict[str, Any] | None = None,
+) -> Path:
+    if playback_speed <= 0:
+        raise ValueError("playback_speed must be positive")
+
     stages_by_job, horizon = build_stage_infos(solution)
-    machines, buffers, out_nodes, used_edges = infer_resources(solution)
-    positions = layout_nodes(machines, buffers, out_nodes)
+    initial_transfers = build_initial_transfers(solution)
+    machines, entry_nodes, buffers, out_nodes, used_edges = infer_resources(solution, instance_graph)
+    positions = layout_nodes(entry_nodes, machines, buffers, out_nodes, used_edges)
     colors = job_colors(stages_by_job)
+    effective_time_step = time_step * playback_speed
 
     fig = plt.figure(figsize=(14, 8.5))
     network_ax = fig.add_axes([0.05, 0.28, 0.90, 0.67])
     timeline_ax = fig.add_axes([0.08, 0.08, 0.84, 0.14])
 
-    network_ax.set_xlim(0.0, 1.0)
+    network_ax.set_xlim(-0.08, 1.14)
     network_ax.set_ylim(0.0, 1.0)
     network_ax.set_aspect("equal")
     network_ax.axis("off")
@@ -391,9 +864,19 @@ def render_animation(solution: dict[str, Any], out_path: Path, fps: int, time_st
 
     edge_artists: dict[str, FancyArrowPatch] = {}
     edge_labels: list[Any] = []
+    edge_pair_counts: dict[tuple[str, str], int] = defaultdict(int)
+    edge_pair_seen: dict[tuple[str, str], int] = defaultdict(int)
+    for edge in used_edges:
+        pair = tuple(sorted((str(edge["tail"]), str(edge["head"]))))
+        edge_pair_counts[pair] += 1
+
+    occupied_label_boxes: list[tuple[float, float, float, float]] = []
     for edge in used_edges:
         start = positions[edge["tail"]]
         end = positions[edge["head"]]
+        pair = tuple(sorted((str(edge["tail"]), str(edge["head"]))))
+        lane_index = edge_pair_seen[pair]
+        edge_pair_seen[pair] += 1
         arrow = FancyArrowPatch(
             start,
             end,
@@ -407,20 +890,44 @@ def render_animation(solution: dict[str, Any], out_path: Path, fps: int, time_st
         network_ax.add_patch(arrow)
         edge_artists[edge["edge_id"]] = arrow
 
-        label_pos = lerp(start, end, 0.5)
+        label_pos = edge_label_position(
+            edge,
+            start,
+            end,
+            lane_index,
+            edge_pair_counts[pair],
+            occupied_label_boxes,
+        )
         edge_labels.append(
             network_ax.text(
                 label_pos[0],
-                label_pos[1] + 0.03,
-                edge["edge_id"],
+                label_pos[1],
+                compact_edge_label(edge),
                 ha="center",
                 va="center",
-                fontsize=7,
+                fontsize=6.5,
                 color="0.35",
+                bbox={"boxstyle": "round,pad=0.08", "facecolor": "white", "edgecolor": "none", "alpha": 0.70},
+                zorder=2,
             )
         )
 
     node_patches: dict[str, Any] = {}
+    for entry_name in entry_nodes:
+        x, y = positions[entry_name]
+        patch = Rectangle(
+            (x - 0.06, y - 0.035),
+            0.12,
+            0.07,
+            facecolor="#eef7ff",
+            edgecolor="black",
+            linewidth=1.8,
+            zorder=3,
+        )
+        network_ax.add_patch(patch)
+        node_patches[entry_name] = patch
+        network_ax.text(x, y, entry_name, ha="center", va="center", fontsize=9, weight="bold", zorder=4)
+
     for machine in machines:
         x, y = positions[machine]
         patch = Circle((x, y), 0.055, facecolor="white", edgecolor="black", linewidth=1.8, zorder=3)
@@ -486,18 +993,20 @@ def render_animation(solution: dict[str, Any], out_path: Path, fps: int, time_st
         bbox={"boxstyle": "round,pad=0.4", "facecolor": "white", "edgecolor": "0.7"},
     )
 
-    time_cursor, timeline_legend = build_timeline_axes(timeline_ax, stages_by_job, colors, horizon)
+    time_cursor, timeline_legend = build_timeline_axes(
+        timeline_ax, stages_by_job, initial_transfers, colors, horizon
+    )
     timeline_ax.legend(handles=timeline_legend, loc="upper right", fontsize=8)
 
     job_legend = [Line2D([0], [0], marker="o", color="w", markerfacecolor=colors[job], markeredgecolor="black", label=job, markersize=9) for job in sorted(colors)]
     network_ax.legend(handles=job_legend, loc="lower left", fontsize=8, title="Jobs")
 
-    frame_count = int(horizon / time_step) + 2
+    frame_count = int(horizon / effective_time_step) + 2
 
     def update(frame_index: int) -> list[Any]:
-        current_time = min(frame_index * time_step, horizon)
+        current_time = min(frame_index * effective_time_step, horizon)
         states = {
-            job: job_state_at(stages_by_job, job, current_time, positions, horizon)
+            job: job_state_at(stages_by_job, initial_transfers, job, current_time, positions, horizon)
             for job in sorted(stages_by_job)
         }
         distribute_overlaps(states)
@@ -511,6 +1020,8 @@ def render_animation(solution: dict[str, Any], out_path: Path, fps: int, time_st
         for name, patch in node_patches.items():
             if name == "OUT":
                 patch.set_facecolor("#eef7e8")
+            elif name in entry_nodes:
+                patch.set_facecolor("#eef7ff")
             else:
                 patch.set_facecolor("white")
             patch.set_alpha(1.0)
@@ -530,6 +1041,8 @@ def render_animation(solution: dict[str, Any], out_path: Path, fps: int, time_st
                 active_edges[state["edge_id"]].append(job)
 
         for edge_id, jobs in active_edges.items():
+            if edge_id not in edge_artists:
+                continue
             lead_job = sorted(jobs)[0]
             edge_artists[edge_id].set_color(colors[lead_job])
             edge_artists[edge_id].set_alpha(0.95)
@@ -551,12 +1064,12 @@ def render_animation(solution: dict[str, Any], out_path: Path, fps: int, time_st
                 node_patches[machine].set_linewidth(2.6)
             machine_status_texts[machine].set_text(", ".join(f"{job}:{role}" for job, role in activities))
 
-        for node_name in buffers + out_nodes:
+        for node_name in entry_nodes + buffers + out_nodes:
             occupants = [job for job, state in states.items() if state["node"] == node_name]
             if occupants and node_name in node_patches:
                 lead_job = sorted(occupants)[0]
                 node_patches[node_name].set_facecolor(colors[lead_job])
-                node_patches[node_name].set_alpha(0.25 if node_name != "OUT" else 0.35)
+                node_patches[node_name].set_alpha(0.25 if node_name not in out_nodes else 0.35)
 
         time_text.set_text(f"time = {current_time:.2f}")
         status_text.set_text("\n".join(status_lines))
@@ -595,6 +1108,11 @@ def main() -> None:
         help="Output GIF path (defaults to solution_animation.gif next to the JSON file)",
     )
     parser.add_argument(
+        "--data",
+        default=None,
+        help="Path to the original instance JSON. If omitted, outputs/<name>/solution.json tries <name>.json.",
+    )
+    parser.add_argument(
         "--fps",
         type=int,
         default=6,
@@ -606,7 +1124,16 @@ def main() -> None:
         default=0.25,
         help="Simulated time units between animation frames",
     )
+    parser.add_argument(
+        "--playback-speed",
+        type=float,
+        default=0.5,
+        help="Playback speed multiplier. Values below 1 slow the GIF down.",
+    )
     args = parser.parse_args()
+
+    if args.playback_speed <= 0:
+        parser.error("--playback-speed must be positive")
 
     solution_path = Path(args.solution)
     out_path = (
@@ -616,7 +1143,16 @@ def main() -> None:
     )
 
     solution = load_solution(solution_path)
-    rendered = render_animation(solution, out_path, fps=args.fps, time_step=args.time_step)
+    data_path = Path(args.data) if args.data is not None else default_data_path_for_solution(solution_path)
+    instance_graph = load_instance_graph(data_path) if data_path is not None else None
+    rendered = render_animation(
+        solution,
+        out_path,
+        fps=args.fps,
+        time_step=args.time_step,
+        playback_speed=args.playback_speed,
+        instance_graph=instance_graph,
+    )
     print(f"Wrote: {rendered}")
 
 

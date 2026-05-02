@@ -62,6 +62,22 @@ def load_solution(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def as_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def edge_arms(edge: dict[str, Any]) -> list[str]:
+    return as_list(edge.get("arms", edge.get("arm")))
+
+
+def edge_hosts(edge: dict[str, Any]) -> list[str]:
+    return as_list(edge.get("hosts", edge.get("host")))
+
+
 def infer_resources(solution: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
     leaders = solution.get("leaders", {})
     coalitions = solution.get("coalitions", {})
@@ -70,6 +86,8 @@ def infer_resources(solution: dict[str, Any]) -> tuple[list[str], list[str], lis
     machines: set[str] = set()
     arms: set[str] = set()
     nodes: set[str] = set()
+    indegree: dict[str, int] = defaultdict(int)
+    outdegree: dict[str, int] = defaultdict(int)
 
     for leader in leaders.values():
         if leader:
@@ -81,20 +99,27 @@ def infer_resources(solution: dict[str, Any]) -> tuple[list[str], list[str], lis
 
     for edges in transfers.values():
         for edge in edges:
-            arm = edge.get("arm")
-            host = edge.get("host")
             tail = edge.get("tail")
             head = edge.get("head")
-            if arm:
+            for arm in edge_arms(edge):
                 arms.add(arm)
-            if host:
+            for host in edge_hosts(edge):
                 machines.add(host)
             if tail:
                 nodes.add(tail)
+                outdegree[str(tail)] += 1
             if head:
                 nodes.add(head)
+                indegree[str(head)] += 1
 
-    buffers = sorted(node for node in nodes if node not in machines and node != "OUT")
+    entry_nodes = {
+        node
+        for node in nodes
+        if node not in machines and node != "OUT" and outdegree[node] > 0 and indegree[node] == 0
+    }
+    buffers = sorted(
+        node for node in nodes if node not in machines and node != "OUT" and node not in entry_nodes
+    )
     return sorted(machines), sorted(arms), buffers
 
 
@@ -144,16 +169,16 @@ def build_intervals(
         for edge in ordered:
             start = float(edge["S"])
             end = start + float(edge["delta"])
-            arm = edge.get("arm")
-            host = edge.get("host")
             short_label = f"{stage_key} {edge.get('tail')}->{edge.get('head')}"
 
-            if arm in arm_intervals:
-                arm_intervals[arm].append(Interval(start, end, short_label, job, "transfer"))
-            if host in machine_intervals:
-                machine_intervals[host].append(
-                    Interval(start, end, f"{stage_key} arm-use", job, "host-transfer")
-                )
+            for arm in edge_arms(edge):
+                if arm in arm_intervals:
+                    arm_intervals[arm].append(Interval(start, end, short_label, job, "transfer"))
+            for host in edge_hosts(edge):
+                if host in machine_intervals:
+                    machine_intervals[host].append(
+                        Interval(start, end, f"{stage_key} arm-use", job, "host-transfer")
+                    )
             horizon = max(horizon, end)
 
         for index in range(1, len(ordered)):

@@ -5,7 +5,8 @@
     "B": ["B24", "B12", "B56"],
     "K": ["WELD", "PAINT", "INSPECT", "ASSEMBLE_2"],
     "A": ["arm_M2", "arm_M4", "arm_M5", "arm_M6"],
-    "V_out": "OUT"
+    "V_out": "OUT",
+    "V_in": ["IN_V1", "IN_V2"]
   },
 
   "jobs": [
@@ -14,6 +15,7 @@
       "variant": "V1",
       "release": 0,
       "deadline": 80,
+      "entry_node": "IN_V1",
       "operations": [
         { "op_index": 1, "task_type": "WELD" },
         { "op_index": 2, "task_type": "ASSEMBLE_2" },
@@ -25,6 +27,7 @@
       "variant": "V1",
       "release": 0,
       "deadline": 80,
+      "entry_node": "IN_V1",
       "operations": [
         { "op_index": 1, "task_type": "WELD" },
         { "op_index": 2, "task_type": "ASSEMBLE_2" },
@@ -36,6 +39,7 @@
       "variant": "V2",
       "release": 1,
       "deadline": 90,
+      "entry_node": "IN_V2",
       "operations": [
         { "op_index": 1, "task_type": "WELD" },
         { "op_index": 2, "task_type": "PAINT" },
@@ -49,56 +53,74 @@
   "task_types": {
     "WELD": {
       "coalition_size": 1,
-      "description": "single-machine welding"
+      "description": "single-machine welding",
+      "required_capabilities": {
+        "WELD": 1
+      }
     },
     "PAINT": {
       "coalition_size": 1,
-      "description": "single-machine painting"
+      "description": "single-machine painting",
+      "required_capabilities": {
+        "PAINT": 1
+      }
     },
     "INSPECT": {
       "coalition_size": 1,
-      "description": "single-machine inspection"
+      "description": "single-machine inspection",
+      "required_capabilities": {
+        "INSPECT": 1
+      }
     },
     "ASSEMBLE_2": {
       "coalition_size": 2,
-      "description": "needs 2 machines simultaneously"
+      "description": "needs 2 machines simultaneously",
+      "required_capabilities": {
+        "ASSEMBLE_2": 2
+      }
     }
   },
 
   "machines": {
     "M1": {
-      "capabilities": ["WELD"],
-      "processing_time": { "WELD": 6 },
-      "has_arm": false
+      "capabilities": ["WELD", "INSPECT"],
+      "processing_time": { "WELD": 6, "INSPECT": 7 },
+      "has_arm": false,
+      "neighbors": ["M1", "M2"]
     },
     "M2": {
-      "capabilities": ["WELD", "ASSEMBLE_2"],
-      "processing_time": { "WELD": 5, "ASSEMBLE_2": 8 },
+      "capabilities": ["WELD", "ASSEMBLE_2", "PAINT"],
+      "processing_time": { "WELD": 5, "ASSEMBLE_2": 8, "PAINT": 6 },
       "has_arm": true,
-      "arm_id": "arm_M2"
+      "arm_id": "arm_M2",
+      "neighbors": ["M2", "M1", "M4"]
     },
     "M3": {
-      "capabilities": ["INSPECT"],
-      "processing_time": { "INSPECT": 4 },
-      "has_arm": false
+      "capabilities": ["INSPECT", "WELD"],
+      "processing_time": { "INSPECT": 4, "WELD": 6 },
+      "has_arm": false,
+      "neighbors": ["M3", "M4"]
     },
     "M4": {
-      "capabilities": ["PAINT", "ASSEMBLE_2"],
-      "processing_time": { "PAINT": 4, "ASSEMBLE_2": 7 },
+      "capabilities": ["PAINT", "ASSEMBLE_2", "INSPECT"],
+      "processing_time": { "PAINT": 4, "ASSEMBLE_2": 7, "INSPECT": 5 },
       "has_arm": true,
-      "arm_id": "arm_M4"
+      "arm_id": "arm_M4",
+      "neighbors": ["M4", "M2", "M3", "M6"]
     },
     "M5": {
-      "capabilities": ["PAINT", "INSPECT"],
-      "processing_time": { "PAINT": 5, "INSPECT": 5 },
+      "capabilities": ["PAINT", "INSPECT", "WELD"],
+      "processing_time": { "PAINT": 5, "INSPECT": 5, "WELD": 7 },
       "has_arm": true,
-      "arm_id": "arm_M5"
+      "arm_id": "arm_M5",
+      "neighbors": ["M5", "M6"]
     },
     "M6": {
-      "capabilities": ["WELD", "ASSEMBLE_2"],
-      "processing_time": { "WELD": 7, "ASSEMBLE_2": 9 },
+      "capabilities": ["WELD", "ASSEMBLE_2", "PAINT"],
+      "processing_time": { "WELD": 7, "ASSEMBLE_2": 9, "PAINT": 6 },
       "has_arm": true,
-      "arm_id": "arm_M6"
+      "arm_id": "arm_M6",
+      "neighbors": ["M6", "M5", "M4"]
     }
   },
 
@@ -137,41 +159,43 @@
   },
 
   "graph": {
-    "nodes": ["M1", "M2", "M3", "M4", "M5", "M6", "B24", "B12", "B56", "OUT"],
+    "nodes": ["IN_V1", "IN_V2", "M1", "M2", "M3", "M4", "M5", "M6", "B24", "B12", "B56", "OUT"],
     "edges": [
-      { "edge_id": "e_M2_OUT", "tail": "M2", "head": "OUT", "delta": 1.0, "served_by_arm": "arm_M2" },
-      { "edge_id": "e_M4_OUT", "tail": "M4", "head": "OUT", "delta": 0.8, "served_by_arm": "arm_M4" },
-      { "edge_id": "e_M3_OUT", "tail": "M3", "head": "OUT", "delta": 1.2, "served_by_arm": "arm_M4" },
-      { "edge_id": "e_M5_OUT", "tail": "M5", "head": "OUT", "delta": 1.0, "served_by_arm": "arm_M5" },
-      { "edge_id": "e_M6_OUT", "tail": "M6", "head": "OUT", "delta": 1.1, "served_by_arm": "arm_M6" },
+      { "edge_id": "e_IN_V1_M2", "tail": "IN_V1", "head": "M2", "delta": 0.8, "served_by_arms": ["arm_M2"] },
+      { "edge_id": "e_IN_V2_M6", "tail": "IN_V2", "head": "M6", "delta": 0.8, "served_by_arms": ["arm_M6"] },
 
-      { "edge_id": "e_M2_M4_direct", "tail": "M2", "head": "M4", "delta": 1.6, "served_by_arm": "arm_M2" },
-      { "edge_id": "e_M2_B24", "tail": "M2", "head": "B24", "delta": 0.9, "served_by_arm": "arm_M2" },
-      { "edge_id": "e_B24_M4", "tail": "B24", "head": "M4", "delta": 0.9, "served_by_arm": "arm_M4" },
+      { "edge_id": "e_M2_OUT", "tail": "M2", "head": "OUT", "delta": 1.0, "served_by_arms": ["arm_M2"] },
+      { "edge_id": "e_M4_OUT", "tail": "M4", "head": "OUT", "delta": 0.8, "served_by_arms": ["arm_M4"] },
+      { "edge_id": "e_M5_OUT", "tail": "M5", "head": "OUT", "delta": 1.0, "served_by_arms": ["arm_M5"] },
+      { "edge_id": "e_M6_OUT", "tail": "M6", "head": "OUT", "delta": 1.1, "served_by_arms": ["arm_M6"] },
 
-      { "edge_id": "e_M4_M2_direct", "tail": "M4", "head": "M2", "delta": 1.6, "served_by_arm": "arm_M4" },
-      { "edge_id": "e_M4_B24", "tail": "M4", "head": "B24", "delta": 0.9, "served_by_arm": "arm_M4" },
-      { "edge_id": "e_B24_M2", "tail": "B24", "head": "M2", "delta": 0.9, "served_by_arm": "arm_M2" },
+      { "edge_id": "e_M2_M4_direct", "tail": "M2", "head": "M4", "delta": 1.6, "served_by_arms": ["arm_M2", "arm_M4"] },
+      { "edge_id": "e_M2_B24", "tail": "M2", "head": "B24", "delta": 0.9, "served_by_arms": ["arm_M2"] },
+      { "edge_id": "e_B24_M4", "tail": "B24", "head": "M4", "delta": 0.9, "served_by_arms": ["arm_M4"] },
 
-      { "edge_id": "e_M2_B12", "tail": "M2", "head": "B12", "delta": 0.25, "served_by_arm": "arm_M2" },
-      { "edge_id": "e_B12_M2", "tail": "B12", "head": "M2", "delta": 0.25, "served_by_arm": "arm_M2" },
+      { "edge_id": "e_M4_M2_direct", "tail": "M4", "head": "M2", "delta": 1.6, "served_by_arms": ["arm_M4", "arm_M2"] },
+      { "edge_id": "e_M4_B24", "tail": "M4", "head": "B24", "delta": 0.9, "served_by_arms": ["arm_M4"] },
+      { "edge_id": "e_B24_M2", "tail": "B24", "head": "M2", "delta": 0.9, "served_by_arms": ["arm_M2"] },
 
-      { "edge_id": "e_M4_M3", "tail": "M4", "head": "M3", "delta": 1.1, "served_by_arm": "arm_M4" },
-      { "edge_id": "e_M3_M4", "tail": "M3", "head": "M4", "delta": 1.1, "served_by_arm": "arm_M4" },
+      { "edge_id": "e_M2_B12", "tail": "M2", "head": "B12", "delta": 0.25, "served_by_arms": ["arm_M2"] },
+      { "edge_id": "e_B12_M2", "tail": "B12", "head": "M2", "delta": 0.25, "served_by_arms": ["arm_M2"] },
 
-      { "edge_id": "e_M6_M5_direct", "tail": "M6", "head": "M5", "delta": 1.4, "served_by_arm": "arm_M6" },
-      { "edge_id": "e_M6_B56", "tail": "M6", "head": "B56", "delta": 0.6, "served_by_arm": "arm_M6" },
-      { "edge_id": "e_B56_M5", "tail": "B56", "head": "M5", "delta": 0.6, "served_by_arm": "arm_M5" },
+      { "edge_id": "e_M4_M3", "tail": "M4", "head": "M3", "delta": 1.1, "served_by_arms": ["arm_M4"] },
+      { "edge_id": "e_M3_M4", "tail": "M3", "head": "M4", "delta": 1.1, "served_by_arms": ["arm_M4"] },
 
-      { "edge_id": "e_M5_M6_direct", "tail": "M5", "head": "M6", "delta": 1.4, "served_by_arm": "arm_M5" },
-      { "edge_id": "e_M5_B56", "tail": "M5", "head": "B56", "delta": 0.6, "served_by_arm": "arm_M5" },
-      { "edge_id": "e_B56_M6", "tail": "B56", "head": "M6", "delta": 0.6, "served_by_arm": "arm_M6" },
+      { "edge_id": "e_M6_M5_direct", "tail": "M6", "head": "M5", "delta": 1.4, "served_by_arms": ["arm_M6", "arm_M5"] },
+      { "edge_id": "e_M6_B56", "tail": "M6", "head": "B56", "delta": 0.6, "served_by_arms": ["arm_M6"] },
+      { "edge_id": "e_B56_M5", "tail": "B56", "head": "M5", "delta": 0.6, "served_by_arms": ["arm_M5"] },
 
-      { "edge_id": "e_M1_M2_direct", "tail": "M1", "head": "M2", "delta": 1.3, "served_by_arm": "arm_M2" },
-      { "edge_id": "e_M2_M1_direct", "tail": "M2", "head": "M1", "delta": 1.3, "served_by_arm": "arm_M2" },
+      { "edge_id": "e_M5_M6_direct", "tail": "M5", "head": "M6", "delta": 1.4, "served_by_arms": ["arm_M5", "arm_M6"] },
+      { "edge_id": "e_M5_B56", "tail": "M5", "head": "B56", "delta": 0.6, "served_by_arms": ["arm_M5"] },
+      { "edge_id": "e_B56_M6", "tail": "B56", "head": "M6", "delta": 0.6, "served_by_arms": ["arm_M6"] },
 
-      { "edge_id": "e_M4_M6_direct", "tail": "M4", "head": "M6", "delta": 2.0, "served_by_arm": "arm_M4" },
-      { "edge_id": "e_M6_M4_direct", "tail": "M6", "head": "M4", "delta": 2.0, "served_by_arm": "arm_M6" }
+      { "edge_id": "e_M1_M2_direct", "tail": "M1", "head": "M2", "delta": 1.3, "served_by_arms": ["arm_M2"] },
+      { "edge_id": "e_M2_M1_direct", "tail": "M2", "head": "M1", "delta": 1.3, "served_by_arms": ["arm_M2"] },
+
+      { "edge_id": "e_M4_M6_direct", "tail": "M4", "head": "M6", "delta": 2.0, "served_by_arms": ["arm_M4", "arm_M6"] },
+      { "edge_id": "e_M6_M4_direct", "tail": "M6", "head": "M4", "delta": 2.0, "served_by_arms": ["arm_M6", "arm_M4"] }
     ]
   },
 

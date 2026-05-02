@@ -121,7 +121,7 @@ def extract_solution(data, model) -> dict:
 
 def write_human_readable(data, sol: dict) -> str:
     lines = []
-    lines.append(f"Objective (sum completion at OUT): {sol['objective']:.3f}\n")
+    lines.append(f"Objective value: {sol['objective']:.3f}\n")
 
     lines.append("=== OPERATIONS ===")
     for (j, i) in data.ops:
@@ -155,10 +155,32 @@ def write_human_readable(data, sol: dict) -> str:
     return "\n".join(lines)
 
 
+def has_feasible_solution(result) -> bool:
+    try:
+        return len(result.solution) > 0
+    except Exception:
+        pass
+
+    try:
+        upper_bound = result.problem.upper_bound
+        return upper_bound is not None and upper_bound != float("inf")
+    except Exception:
+        return False
+
+
+def load_solution_into_model(result, solver, model) -> None:
+    if hasattr(solver, "load_vars"):
+        solver.load_vars()
+    else:
+        model.solutions.load_from(result)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=str, required=True, help="Path to JSON instance, e.g. test.json")
     ap.add_argument("--out", type=str, default="outputs", help="Output folder")
+    ap.add_argument("--time-limit", type=float, default=300.0, help="Solver time limit in seconds")
+    ap.add_argument("--mip-rel-gap", type=float, default=0.01, help="Relative MIP gap tolerance")
     args = ap.parse_args()
 
     data = load_instance(args.data)
@@ -167,8 +189,8 @@ def main():
     solver = pick_solver()
 
     highs_opts = {
-        "time_limit": 300,        # Sekunden
-        "mip_rel_gap": 0.01,      #  Prozent Gap
+        "time_limit": args.time_limit,
+        "mip_rel_gap": args.mip_rel_gap,
         # "mip_abs_gap": 1e-3,
         # "mip_max_nodes": 200000,
         # "mip_max_stall_nodes": 20000,
@@ -179,10 +201,20 @@ def main():
         solver.highs_options.update(highs_opts)
     else:                                    # highs legacy
         solver.options.update(highs_opts)
-    result = solver.solve(model, tee=True)
+    result = solver.solve(model, tee=True, load_solutions=False)
 
     # Basic solve status check
     term = str(result.solver.termination_condition).lower()
+    if not has_feasible_solution(result):
+        print("WARNING: No feasible solution found.")
+        print("Termination condition:", result.solver.termination_condition)
+        lower_bound = getattr(result.problem, "lower_bound", None)
+        if lower_bound is not None:
+            print("Best objective bound:", lower_bound)
+        return
+
+    load_solution_into_model(result, solver, model)
+
     if "optimal" not in term and "feasible" not in term:
         print("WARNING: Solver termination condition:", result.solver.termination_condition)
 
